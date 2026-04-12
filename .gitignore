@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# Blender
+*.blend1
+*.blend2
+
+# Virtual environments
+.venv/
+venv/
+
+# Pytest
+.pytest_cache/
+.coverage
+
+# Zip artifacts
+*.zip
+
+# IDE
+.vscode/
+.idea/
