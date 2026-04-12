@@ -15,9 +15,7 @@ from blendiff.diff_engine import DiffEngine
 from blendiff.data_model.diff import ChangeKind
 
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 def _obj(
     name="Cube",
@@ -63,9 +61,7 @@ def _col(name, path, children=None, objects=None):
     }
 
 
-# ---------------------------------------------------------------------------
 # Tests
-# ---------------------------------------------------------------------------
 
 class TestDiffEngineObjects:
 
