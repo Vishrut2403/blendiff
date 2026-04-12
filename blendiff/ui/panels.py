@@ -1,183 +1,255 @@
 """
-blendiff.ui.panels
-~~~~~~~~~~~~~~~~~~
-Sidebar panel for the BlenDiff add-on.
+ui/panels.py
 
-Layout
-------
-  [Capture Snapshot (A)]
-  [Run Diff]           [Clear]
+BlenDiff sidebar panel — 3D Viewport → N panel → BlenDiff tab.
 
-  ── Summary ──────────────────
-  Added:    2    Removed: 0
-  Modified: 3    Collections: 1
-
-  ── Object Diffs ─────────────
-  ▸ [+] Cube.001         (added)
-  ▸ [~] Suzanne          (modified)
-	   transform.location  [0,0,0] → [1,2,3]
-	   material_slots[0]   None → Metal
-  ...
-
-Design decisions
-----------------
-* The panel reads from wm["blendiff_result"] (a JSON string).  This
-  decouples the panel completely from the diff pipeline — it is a pure
-  display layer.
-* We parse the JSON lazily (only when the panel draws) so stale results
-  from a previous session never crash registration.
-* Each object diff section is collapsible using a per-object bool stored
-  on the WindowManager.
+Sub-panels:
+  BLENDIFF_PT_Main            — capture/diff/clear (legacy in-memory workflow)
+  BLENDIFF_PT_SnapshotHistory — list sidecar snapshots, diff/delete per row
+  BLENDIFF_PT_Results         — display the current diff result
 """
 
-from __future__ import annotations
-
 import json
-import logging
-
 import bpy
-from bpy.types import Panel
 
-log = logging.getLogger(__name__)
-
-# Colour tags for the diff kind labels
-_KIND_ICON = {
-	"added":    "ADD",
-	"removed":  "REMOVE",
-	"modified": "MODIFIER",
-}
-
-_KIND_LABEL = {
-	"added":    "(+) added",
-	"removed":  "(-) removed",
-	"modified": "(~) modified",
-}
-
-
-class BLENDIFF_PT_MainPanel(Panel):
-	bl_label       = "BlenDiff"
-	bl_idname      = "BLENDIFF_PT_MainPanel"
-	bl_space_type  = "VIEW_3D"
-	bl_region_type = "UI"
-	bl_category    = "BlenDiff"
-
-	def draw(self, context):
-		layout = self.layout
-		wm     = context.window_manager
-
-		# Actions
-		row = layout.row(align=True)
-		row.operator("blendiff.capture_snapshot", icon="CAMERA_DATA")
-
-		row2 = layout.row(align=True)
-		row2.operator("blendiff.run_diff", icon="FILE_REFRESH")
-		row2.operator("blendiff.clear_results", icon="X", text="")
-
-		has_snapshot = bool(wm.get("blendiff_snapshot_a"))
-		layout.label(
-			text=f"Snapshot A: {'ready' if has_snapshot else 'none'}",
-			icon="CHECKMARK" if has_snapshot else "RADIOBUT_OFF",
-		)
-
-		layout.separator()
-
-		# Results
-		result_json = wm.get("blendiff_result")
-		if not result_json:
-			layout.label(text="No diff results yet.", icon="INFO")
-			return
-
-		try:
-			result = json.loads(result_json)
-		except (json.JSONDecodeError, TypeError) as exc:
-			layout.label(text=f"Error reading results: {exc}", icon="ERROR")
-			return
-
-		self._draw_summary(layout, result.get("summary", {}))
-		self._draw_object_diffs(layout, result.get("object_diffs", []))
-		self._draw_collection_diffs(layout, result.get("collection_diffs", []))
-
-
-
-	def _draw_summary(self, layout, summary: dict) -> None:
-		box = layout.box()
-		box.label(text="Summary", icon="LINENUMBERS_ON")
-
-		grid = box.grid_flow(row_major=True, columns=2, even_columns=True)
-		grid.label(text=f"Added:    {summary.get('added', 0)}")
-		grid.label(text=f"Removed:  {summary.get('removed', 0)}")
-		grid.label(text=f"Modified: {summary.get('modified', 0)}")
-		grid.label(text=f"Collections: {summary.get('collection_changes', 0)}")
-
-	def _draw_object_diffs(self, layout, diffs: list) -> None:
-		if not diffs:
-			return
-
-		box = layout.box()
-		box.label(text="Object Changes", icon="OBJECT_DATA")
-
-		for diff in diffs:
-			kind  = diff.get("kind", "modified")
-			name  = diff.get("name", "?")
-			icon  = _KIND_ICON.get(kind, "DOT")
-			label = _KIND_LABEL.get(kind, kind)
-
-			row = box.row()
-			row.label(text=f"{name}  {label}", icon=icon)
-
-			# Show property changes for modified objects
-			if kind == "modified":
-				changes = diff.get("changes", [])
-				for change in changes[:8]:   # cap at 8 lines to avoid huge panels
-					sub = box.row()
-					sub.scale_y = 0.7
-					sub.label(
-						text=f"  {change['property_path']}: "
-							 f"{_fmt(change['old_value'])} → "
-							 f"{_fmt(change['new_value'])}",
-						icon="BLANK1",
-					)
-				if len(changes) > 8:
-					box.label(text=f"  … and {len(changes) - 8} more.")
-
-	def _draw_collection_diffs(self, layout, diffs: list) -> None:
-		if not diffs:
-			return
-
-		box = layout.box()
-		box.label(text="Collection Changes", icon="OUTLINER_COLLECTION")
-
-		for diff in diffs:
-			kind  = diff.get("kind", "modified")
-			path  = diff.get("path", "?")
-			icon  = _KIND_ICON.get(kind, "DOT")
-			label = _KIND_LABEL.get(kind, kind)
-			box.label(text=f"{path}  {label}", icon=icon)
+from ..storage.sidecar import SidecarManager
 
 
 # Helpers
 
-def _fmt(value) -> str:
-	"""Compact display of a diff value."""
-	if value is None:
-		return "None"
+def _get_sidecar(context) -> SidecarManager:
+	return SidecarManager(bpy.data.filepath)
+
+
+def _get_diff_result(context) -> dict | None:
+	raw = context.window_manager.get("blendiff_result")
+	if not raw:
+		return None
+	try:
+		return json.loads(raw)
+	except (json.JSONDecodeError, TypeError):
+		return None
+
+
+# Main panel (legacy in-memory workflow — preserved)
+
+class BLENDIFF_PT_Main(bpy.types.Panel):
+	bl_label = "BlenDiff"
+	bl_idname = "BLENDIFF_PT_Main"
+	bl_space_type = "VIEW_3D"
+	bl_region_type = "UI"
+	bl_category = "BlenDiff"
+
+	def draw(self, context):
+		layout = self.layout
+		wm = context.window_manager
+
+		# --- In-memory snapshot workflow ---
+		layout.label(text="Quick Diff (in-memory)", icon="CAMERA_DATA")
+		col = layout.column(align=True)
+		col.operator("blendiff.capture_snapshot", icon="PLUS")
+		col.operator("blendiff.run_diff", icon="PLAY")
+		col.operator("blendiff.clear_results", icon="X")
+
+		layout.separator()
+
+		# --- Sidecar snapshot workflow ---
+		layout.label(text="Snapshot History", icon="DISK_DRIVE")
+		if not bpy.data.filepath:
+			layout.label(text="Save your .blend file first", icon="ERROR")
+		else:
+			layout.operator("blendiff.save_snapshot", icon="PLUS")
+
+
+# Snapshot History sub-panel
+
+class BLENDIFF_PT_SnapshotHistory(bpy.types.Panel):
+	bl_label = "Snapshot History"
+	bl_idname = "BLENDIFF_PT_SnapshotHistory"
+	bl_space_type = "VIEW_3D"
+	bl_region_type = "UI"
+	bl_category = "BlenDiff"
+	bl_parent_id = "BLENDIFF_PT_Main"
+	bl_options = {"DEFAULT_CLOSED"}
+
+	@classmethod
+	def poll(cls, context):
+		return bool(bpy.data.filepath)
+
+	def draw(self, context):
+		layout = self.layout
+		wm = context.window_manager
+
+		mgr = _get_sidecar(context)
+		snapshots = mgr.list_snapshots()
+
+		if not snapshots:
+			layout.label(text="No snapshots saved yet.", icon="INFO")
+			return
+
+		active_id = wm.get("blendiff_active_snapshot_id", "")
+
+		for snap in snapshots:
+			box = layout.box()
+			row = box.row()
+
+			# Highlight active snapshot
+			is_active = snap.id == active_id
+			icon = "RADIOBUT_ON" if is_active else "RADIOBUT_OFF"
+
+			# Label + timestamp
+			col = row.column()
+			col.label(text=snap.label, icon=icon)
+			col.label(text=snap.timestamp_display())
+
+			# Action buttons
+			col = row.column(align=True)
+
+			op = col.operator(
+				"blendiff.diff_against_snapshot",
+				text="",
+				icon="PLAY",
+			)
+			op.snapshot_id = snap.id
+
+			op = col.operator(
+				"blendiff.delete_snapshot",
+				text="",
+				icon="TRASH",
+			)
+			op.snapshot_id = snap.id
+
+
+# Results sub-panel
+
+class BLENDIFF_PT_Results(bpy.types.Panel):
+	bl_label = "Diff Results"
+	bl_idname = "BLENDIFF_PT_Results"
+	bl_space_type = "VIEW_3D"
+	bl_region_type = "UI"
+	bl_category = "BlenDiff"
+	bl_parent_id = "BLENDIFF_PT_Main"
+	bl_options = {"DEFAULT_CLOSED"}
+
+	@classmethod
+	def poll(cls, context):
+		return bool(context.window_manager.get("blendiff_result"))
+
+	def draw(self, context):
+		layout = self.layout
+		wm = context.window_manager
+		diff = _get_diff_result(context)
+
+		if diff is None:
+			layout.label(text="No diff result available.", icon="INFO")
+			return
+
+		# --- Active snapshot label ---
+		active_label = wm.get("blendiff_active_snapshot_label")
+		if active_label:
+			layout.label(text=f"vs. '{active_label}'", icon="BOOKMARKS")
+
+		# --- Summary ---
+		layout.label(text=diff.get("summary", ""), icon="INFO")
+		layout.separator()
+
+		# --- Added objects ---
+		added = diff.get("added_objects", [])
+		if added:
+			box = layout.box()
+			box.label(text=f"Added ({len(added)})", icon="ADD")
+			for name in added:
+				box.label(text=f"  + {name}")
+
+		# --- Removed objects ---
+		removed = diff.get("removed_objects", [])
+		if removed:
+			box = layout.box()
+			box.label(text=f"Removed ({len(removed)})", icon="REMOVE")
+			for name in removed:
+				box.label(text=f"  - {name}")
+
+		# --- Modified objects ---
+		modified = diff.get("modified_objects", [])
+		if modified:
+			box = layout.box()
+			box.label(text=f"Modified ({len(modified)})", icon="MODIFIER")
+			for obj in modified:
+				row = box.row()
+				row.label(text=f"  ~ {obj['name']}")
+				for change in obj.get("changes", []):
+					sub = box.column()
+					sub.scale_y = 0.8
+					prop = change["property_path"]
+					old = _format_value(change["old_value"])
+					new = _format_value(change["new_value"])
+					sub.label(text=f"      {prop}")
+					sub.label(text=f"        {old}  →  {new}")
+
+		# --- Collection diffs ---
+		col_diffs = diff.get("collection_diffs", [])
+		if col_diffs:
+			box = layout.box()
+			box.label(text=f"Collections ({len(col_diffs)})", icon="OUTLINER_COLLECTION")
+			for cd in col_diffs:
+				kind = cd["kind"].capitalize()
+				box.label(text=f"  {kind}: {cd['path']}")
+				for change in cd.get("changes", []):
+					sub = box.column()
+					sub.scale_y = 0.8
+					prop = change["property_path"]
+					old = _format_value(change["old_value"])
+					new = _format_value(change["new_value"])
+					sub.label(text=f"      {prop}")
+					sub.label(text=f"        {old}  →  {new}")
+
+
+# Value formatting helper  (fixes the material slot dict display bug)
+
+def _format_value(value) -> str:
+	"""
+	Convert a diff value to a readable string for the panel.
+
+	Handles the material slot display bug:
+	  Before: {'index': 0, 'name': 'Material.001', 'use_nodes': True}
+	  After:  Material.001
+	"""
+	if isinstance(value, dict):
+		# Material slot dict
+		if "name" in value and "index" in value:
+			name = value["name"]
+			return name if name else "(empty)"
+		# Generic dict — show key=value pairs compactly
+		pairs = ", ".join(f"{k}={v}" for k, v in value.items())
+		return f"{{{pairs}}}"
+
 	if isinstance(value, list):
-		if len(value) == 3:
-			return f"[{value[0]:.3f}, {value[1]:.3f}, {value[2]:.3f}]"
+		# Short numeric lists (transform components) — round for readability
+		if all(isinstance(x, (int, float)) for x in value):
+			rounded = [round(x, 4) for x in value]
+			return str(rounded)
 		return str(value)
+
+	if value is None:
+		return "(none)"
+
 	return str(value)
 
 
 # Registration
 
-_CLASSES = [BLENDIFF_PT_MainPanel]
+PANELS = [
+	BLENDIFF_PT_Main,
+	BLENDIFF_PT_SnapshotHistory,
+	BLENDIFF_PT_Results,
+]
 
 
 def register():
-	for cls in _CLASSES:
+	for cls in PANELS:
 		bpy.utils.register_class(cls)
 
 
 def unregister():
-	for cls in reversed(_CLASSES):
+	for cls in reversed(PANELS):
 		bpy.utils.unregister_class(cls)
