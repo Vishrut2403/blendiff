@@ -53,8 +53,9 @@ def _run_diff_against_dict(context, snapshot_dict: dict) -> dict:
 	engine = DiffEngine()
 	diff = engine.compare(snapshot_dict, current_dict)
 
+	s = diff.summary()
 	result = {
-		"summary": diff.summary(),
+		"summary": f"Added: {s['added']}  Removed: {s['removed']}  Modified: {s['modified']}  Collections: {s['collection_changes']}",
 		"added_objects": [o.name for o in diff.added_objects],
 		"removed_objects": [o.name for o in diff.removed_objects],
 		"modified_objects": [
