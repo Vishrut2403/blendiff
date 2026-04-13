@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import math
 from typing import Any
+from unittest import result
 
 # Number of decimal places used when rounding float components.
 # Increase for higher precision; decrease to reduce noise in large scenes.
@@ -87,11 +88,13 @@ class SceneSerializer:
 		}
 
 	def _serialize_material_slot(self, slot: dict) -> dict:
-		return {
+		result = {
 			"index":     int(slot["index"]),
-			"name":      slot["name"],           # already str or None
-			"use_nodes": slot["use_nodes"],       # already bool or None
+			"name":      slot["name"],
+			"use_nodes": slot["use_nodes"],
+			"node_graph": slot.get("node_graph"),  # None when no nodes
 		}
+		return result
 
 	# Collection serialization
 
