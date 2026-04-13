@@ -1,0 +1,103 @@
+# .github/workflows/blendiff.yml
+#
+# BlenDiff CI — automatic scene diff on every push
+#
+# What this does:
+#   On every push or pull request that touches a .blend or .blendiff file,
+#   this workflow diffs the two most recent snapshots and prints the result.
+#   If --fail-on-changes is set, the build fails when unexpected changes appear.
+#
+# Prerequisites:
+#   1. Your repo contains a .blendiff sidecar file committed alongside the .blend
+#   2. Python 3.10+ available on the runner (default on ubuntu-latest)
+#   3. BlenDiff is either installed as a package or available as a submodule
+#
+# Setup:
+#   Copy this file to .github/workflows/blendiff.yml in your repo.
+#   Adjust SIDECAR_PATH to point to your .blendiff file.
+
+name: BlenDiff Scene Check
+
+on:
+  push:
+    paths:
+      - "**.blend"
+      - "**.blendiff"
+  pull_request:
+    paths:
+      - "**.blend"
+      - "**.blendiff"
+
+env:
+  SIDECAR_PATH: "my_scene.blendiff"   # ← change this to your sidecar path
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  scene-diff:
+    name: Check scene changes
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install BlenDiff
+        run: |
+          pip install -e .
+        # If BlenDiff is not a pip package yet, use this instead:
+        # run: echo "PYTHONPATH=$PYTHONPATH:." >> $GITHUB_ENV
+
+      - name: List snapshots
+        run: |
+          python -m blendiff.cli list ${{ env.SIDECAR_PATH }}
+
+      - name: Diff latest two snapshots
+        run: |
+          python -m blendiff.cli latest ${{ env.SIDECAR_PATH }} \
+            --output diff_report.html
+        # Add --fail-on-changes to make the build fail if anything changed:
+        # python -m blendiff.cli latest ${{ env.SIDECAR_PATH }} --fail-on-changes
+
+      - name: Upload HTML diff report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: blendiff-report
+          path: diff_report.html
+          retention-days: 30
+
+  # Optional: diff against a specific named snapshot (e.g. "Last approved")
+  scene-diff-approved:
+    name: Check against approved baseline
+    runs-on: ubuntu-latest
+    # Remove the 'if: false' line to enable this job
+    if: false
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install BlenDiff
+        run: pip install -e .
+
+      - name: Diff against approved baseline
+        run: |
+          python -m blendiff.cli compare ${{ env.SIDECAR_PATH }} \
+            "Last approved" \
+            "$(python -m blendiff.cli list ${{ env.SIDECAR_PATH }} --json | python -c 'import json,sys; print(json.load(sys.stdin)[0]["label"])')" \
+            --output diff_report.html \
+            --fail-on-changes
+
+      - name: Upload HTML diff report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: blendiff-approved-report
+          path: diff_report.html
