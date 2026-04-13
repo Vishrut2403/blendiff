@@ -258,6 +258,44 @@ class BLENDIFF_OT_DeleteSnapshot(bpy.types.Operator):
 			self.report({"WARNING"}, "BlenDiff: Snapshot not found.")
 
 		return {"FINISHED"}
+	
+class BLENDIFF_OT_ExportHTML(bpy.types.Operator):
+	"""Export the current diff result as a self-contained HTML report"""
+	bl_idname = "blendiff.export_html"
+	bl_label = "Export HTML Report"
+	bl_description = "Save the diff result as a shareable HTML file"
+
+	def execute(self, context):
+		wm = context.window_manager
+
+		if "blendiff_result" not in wm:
+			self.report({"ERROR"}, "BlenDiff: No diff result to export. Run a diff first.")
+			return {"CANCELLED"}
+
+		if not bpy.data.filepath:
+			self.report({"ERROR"}, "BlenDiff: Please save your .blend file first.")
+			return {"CANCELLED"}
+
+		try:
+				from ..export.html_exporter import export_to_file, build_output_path
+
+				result = json.loads(wm["blendiff_result"])
+				snapshot_label = wm.get("blendiff_active_snapshot_label", "Snapshot")
+
+				output_path = build_output_path(bpy.data.filepath, snapshot_label)
+				export_to_file(
+						result=result,
+						snapshot_label=snapshot_label,
+						blend_filepath=bpy.data.filepath,
+						output_path=output_path,
+				)
+
+				self.report({"INFO"}, f"BlenDiff: Exported to {output_path}")
+				return {"FINISHED"}
+
+		except Exception as e:
+				self.report({"ERROR"}, f"BlenDiff: {e}")
+				return {"CANCELLED"}
 
 
 # Registration
@@ -269,6 +307,7 @@ OPERATORS = [
 	BLENDIFF_OT_SaveSnapshot,
 	BLENDIFF_OT_DiffAgainstSnapshot,
 	BLENDIFF_OT_DeleteSnapshot,
+	BLENDIFF_OT_ExportHTML,
 ]
 
 

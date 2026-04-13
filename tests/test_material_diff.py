@@ -20,9 +20,7 @@ from blendiff.data_model.material import (
 )
 
 
-# ---------------------------------------------------------------------------
 # Helpers — build test material dicts
-# ---------------------------------------------------------------------------
 
 def make_material(
 	name="Material",
@@ -71,9 +69,7 @@ def make_link(from_node, from_socket, to_node, to_socket) -> dict:
 	}
 
 
-# ---------------------------------------------------------------------------
 # compare_materials — identical materials
-# ---------------------------------------------------------------------------
 
 class TestIdenticalMaterials:
 	def test_identical_empty_materials(self):
@@ -103,9 +99,7 @@ class TestIdenticalMaterials:
 		assert compare_materials(mat_a, mat_b, "Material") == []
 
 
-# ---------------------------------------------------------------------------
 # compare_materials — use_nodes change
-# ---------------------------------------------------------------------------
 
 class TestUseNodesChange:
 	def test_use_nodes_false_to_true(self):
@@ -126,9 +120,7 @@ class TestUseNodesChange:
 		assert changes[0].new_value is False
 
 
-# ---------------------------------------------------------------------------
 # compare_materials — node added / removed
-# ---------------------------------------------------------------------------
 
 class TestNodeAddedRemoved:
 	def test_node_added(self):
@@ -158,9 +150,7 @@ class TestNodeAddedRemoved:
 		assert len(changes) == 2
 
 
-# ---------------------------------------------------------------------------
 # compare_materials — node type changed
-# ---------------------------------------------------------------------------
 
 class TestNodeTypeChanged:
 	def test_node_type_change_detected(self):
@@ -186,9 +176,7 @@ class TestNodeTypeChanged:
 		assert len(type_changes) == 1
 
 
-# ---------------------------------------------------------------------------
 # compare_materials — input value changes
-# ---------------------------------------------------------------------------
 
 class TestInputValueChanges:
 	def test_float_input_change(self):
@@ -242,9 +230,7 @@ class TestInputValueChanges:
 		assert "Roughness" in changes[0].property_path
 
 
-# ---------------------------------------------------------------------------
 # compare_materials — image name changes
-# ---------------------------------------------------------------------------
 
 class TestImageNameChanges:
 	def test_image_name_change_detected(self):
@@ -264,9 +250,7 @@ class TestImageNameChanges:
 		assert compare_materials(mat, mat, "Mat") == []
 
 
-# ---------------------------------------------------------------------------
 # compare_materials — link changes
-# ---------------------------------------------------------------------------
 
 class TestLinkChanges:
 	def test_link_added(self):
@@ -313,9 +297,7 @@ class TestLinkChanges:
 		assert compare_materials(mat_a, mat_b, "Mat") == []
 
 
-# ---------------------------------------------------------------------------
 # property_path format
-# ---------------------------------------------------------------------------
 
 class TestPropertyPathFormat:
 	def test_path_contains_material_name(self):
@@ -333,9 +315,7 @@ class TestPropertyPathFormat:
 		assert "inputs.Roughness" in changes[0].property_path
 
 
-# ---------------------------------------------------------------------------
 # _values_equal helper
-# ---------------------------------------------------------------------------
 
 class TestValuesEqual:
 	def test_equal_floats(self):
@@ -372,9 +352,7 @@ class TestValuesEqual:
 		assert _values_equal(True, False, 1e-4) is False
 
 
-# ---------------------------------------------------------------------------
 # MaterialSnapshot dataclass roundtrip
-# ---------------------------------------------------------------------------
 
 class TestMaterialSnapshotRoundtrip:
 	def test_roundtrip_empty(self):

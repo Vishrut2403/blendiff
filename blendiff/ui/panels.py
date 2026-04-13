@@ -149,6 +149,8 @@ class BLENDIFF_PT_Results(bpy.types.Panel):
 		if active_label:
 			layout.label(text=f"vs. '{active_label}'", icon="BOOKMARKS")
 
+		layout.operator("blendiff.export_html", icon="EXPORT")
+
 		# --- Summary ---
 		layout.label(text=diff.get("summary", ""), icon="INFO")
 		layout.separator()
