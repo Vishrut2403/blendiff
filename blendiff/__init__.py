@@ -15,12 +15,14 @@ except ModuleNotFoundError:
 	_IN_BLENDER = False
 
 if _IN_BLENDER:
-	from .ui import panels, operators
+	from .ui import panels, operators, merge_panel
 
 	def register() -> None:
 		operators.register()
 		panels.register()
+		merge_panel.register()
 
 	def unregister() -> None:
+		merge_panel.unregister()
 		panels.unregister()
 		operators.unregister()
