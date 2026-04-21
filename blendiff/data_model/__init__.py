@@ -7,6 +7,7 @@ from .diff import (
 __all__ = [
     "Transform", "MaterialSlot", "SceneObject", "CollectionNode",
     "SerializedScene",
+    "RenderDiff",
     "ChangeKind", "PropertyChange", "ObjectDiff", "CollectionDiff",
     "SceneDiff",
 ]

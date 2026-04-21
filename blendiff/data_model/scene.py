@@ -20,14 +20,15 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 
+
 # Transform
 
 @dataclass
 class Transform:
 	"""Object world-space transform, normalised to plain float lists."""
-	location: list[float]           # [x, y, z]
-	rotation_euler: list[float]     # [x, y, z]  radians
-	scale: list[float]              # [x, y, z]
+	location: list[float]
+	rotation_euler: list[float]
+	scale: list[float]       
 
 
 # Material
@@ -80,4 +81,51 @@ class SerializedScene:
 	scene_name: str
 	objects: dict[str, dict]        # keyed by object name
 	collections: dict[str, dict]    # keyed by collection path
-	# Future: animations, node_groups, world, …
+	# Future: animations, node_groups, world
+
+@dataclass
+class RenderSettings:
+	"""Flat snapshot of the scene render settings relevant for diffing."""
+
+	# Core engine
+	engine: str = ""                    # CYCLES, BLENDER_EEVEE, BLENDER_WORKBENCH
+
+	# Resolution
+	resolution_x: int = 1920
+	resolution_y: int = 1080
+	resolution_percentage: int = 100
+
+	# Sampling
+	# Cycles
+	cycles_samples: int = 128
+	cycles_preview_samples: int = 32
+	cycles_use_denoising: bool = False
+	cycles_denoiser: str = ""           # OPTIX, OPENIMAGEDENOISE
+	cycles_device: str = "CPU"          # CPU / GPU
+
+	# EEVEE
+	eevee_taa_render_samples: int = 64
+	eevee_use_bloom: bool = False
+	eevee_use_ssr: bool = False         # screen-space reflections
+	eevee_shadow_cube_size: str = "512"
+	eevee_shadow_cascade_size: str = "1024"
+
+	# Output
+	filepath: str = ""
+	file_format: str = "PNG"           # PNG, JPEG, OPEN_EXR
+	color_mode: str = "RGBA"
+	color_depth: str = "8"
+
+	# Frame range
+	frame_start: int = 1
+	frame_end: int = 250
+	frame_step: int = 1
+	fps: int = 24
+	fps_base: float = 1.0
+
+	# Color management
+	display_device: str = "sRGB"
+	view_transform: str = "Filmic"
+	look: str = "None"
+	exposure: float = 0.0
+	gamma: float = 1.0

@@ -11,7 +11,7 @@ serialised to JSON for reporting or UI display.
 from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Optional, List
 
 
 class ChangeKind(str, Enum):
@@ -48,6 +48,24 @@ class CollectionDiff:
 	kind: ChangeKind
 	changes: list[PropertyChange] = field(default_factory=list)
 
+@dataclass
+class RenderDiff:
+	"""All changed render-setting properties between two snapshots."""
+	changes: List[PropertyChange] = field(default_factory=list)
+ 
+	@property
+	def has_changes(self) -> bool:
+		return len(self.changes) > 0
+ 
+	def summary(self) -> str:
+		if not self.has_changes:
+			return "Render settings: no changes"
+		lines = [f"Render settings: {len(self.changes)} change(s)"]
+		for c in self.changes:
+			lines.append(f"  {c.property_path}: {c.old_value!r} → {c.new_value!r}")
+		return "\n".join(lines)
+	
+
 
 @dataclass
 class SceneDiff:
@@ -60,9 +78,9 @@ class SceneDiff:
 	"""
 	scene_name_a: str
 	scene_name_b: str
-	object_diffs: list[ObjectDiff]        = field(default_factory=list)
+	object_diffs: list[ObjectDiff] = field(default_factory=list)
 	collection_diffs: list[CollectionDiff] = field(default_factory=list)
-	# Future: animation_diffs, world_diffs, …
+	render: RenderDiff = field(default_factory=RenderDiff) 
 
 	# Convenience aggregators
 

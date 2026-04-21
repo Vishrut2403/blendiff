@@ -1,19 +1,3 @@
-"""
-blendiff.export.html_exporter
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Generates a self-contained HTML diff report from a BlenDiff result dict.
-
-Design decisions
-----------------
-* Zero bpy imports — pure Python, fully testable without Blender.
-* Single file output — inline CSS and JS, no external dependencies.
-* Annotations: each diff entry has a comment textarea. The JS
-  "Download Annotations" button saves them as a companion JSON file
-  using the browser download API.
-* Color convention: green = added, red = removed, yellow = modified.
-* Input: the result dict produced by _run_diff_against_dict() in operators.py.
-"""
-
 from __future__ import annotations
 
 import json
@@ -35,7 +19,7 @@ def generate_html(
 	result:
 		The dict produced by _run_diff_against_dict() — keys:
 		summary, added_objects, removed_objects, modified_objects,
-		collection_diffs.
+		collection_diffs, render_changes.
 	snapshot_label:
 		Label of the snapshot being diffed against (shown in the header).
 	blend_filename:
@@ -56,6 +40,7 @@ def generate_html(
 	removed = result.get("removed_objects", [])
 	modified = result.get("modified_objects", [])
 	col_diffs = result.get("collection_diffs", [])
+	render_changes = result.get("render_changes", [])  # list of PropertyChange dicts
 
 	body_parts: list[str] = []
 
@@ -71,7 +56,7 @@ def generate_html(
 				rows=[],
 			))
 
-	# Removed objects 
+	# Removed objects
 	if removed:
 		body_parts.append(_section_header("Removed Objects", "removed", len(removed)))
 		for name in removed:
@@ -99,7 +84,7 @@ def generate_html(
 				rows=rows,
 			))
 
-	# Collection diffs 
+	# Collection diffs
 	if col_diffs:
 		body_parts.append(_section_header("Collection Changes", "collections", len(col_diffs)))
 		for cd in col_diffs:
@@ -116,6 +101,20 @@ def generate_html(
 				title=f"{prefix} {cd['path']}",
 				rows=rows,
 			))
+
+	# Render settings diff
+	if render_changes:
+		body_parts.append(_section_header("Render Settings", "render", len(render_changes)))
+		rows = [
+			_change_row(c["property_path"], c["old_value"], c["new_value"])
+			for c in render_changes
+		]
+		body_parts.append(_entry_card(
+			entry_id="render_settings",
+			kind="render",
+			title="~ Render Settings",
+			rows=rows,
+		))
 
 	if not body_parts:
 		body_parts.append(
@@ -311,10 +310,11 @@ def _wrap_document(
 	font-size: 0.85rem;
 	font-weight: 600;
   }}
-  .summary-pill.added   {{ background: #1a3a1a; color: #4caf50; border: 1px solid #4caf50; }}
-  .summary-pill.removed {{ background: #3a1a1a; color: #f44336; border: 1px solid #f44336; }}
-  .summary-pill.modified{{ background: #3a3000; color: #ffb300; border: 1px solid #ffb300; }}
-  .summary-pill.collections {{ background: #1a2a3a; color: #42a5f5; border: 1px solid #42a5f5; }}
+  .summary-pill.added      {{ background: #1a3a1a; color: #4caf50; border: 1px solid #4caf50; }}
+  .summary-pill.removed    {{ background: #3a1a1a; color: #f44336; border: 1px solid #f44336; }}
+  .summary-pill.modified   {{ background: #3a3000; color: #ffb300; border: 1px solid #ffb300; }}
+  .summary-pill.collections{{ background: #1a2a3a; color: #42a5f5; border: 1px solid #42a5f5; }}
+  .summary-pill.render     {{ background: #2a1a3a; color: #ce93d8; border: 1px solid #ce93d8; }}
 
   /* ── Section headers ── */
   .section-header {{
@@ -334,10 +334,11 @@ def _wrap_document(
 	margin-left: 0.5rem;
 	vertical-align: middle;
   }}
-  .section-header.added    {{ color: #4caf50; }}
-  .section-header.removed  {{ color: #f44336; }}
-  .section-header.modified {{ color: #ffb300; }}
+  .section-header.added       {{ color: #4caf50; }}
+  .section-header.removed     {{ color: #f44336; }}
+  .section-header.modified    {{ color: #ffb300; }}
   .section-header.collections {{ color: #42a5f5; }}
+  .section-header.render      {{ color: #ce93d8; }}
 
   /* ── Cards ── */
   .card {{
@@ -347,10 +348,11 @@ def _wrap_document(
 	padding: 1rem 1.25rem;
 	margin-bottom: 0.75rem;
   }}
-  .card.added    {{ border-left-color: #4caf50; }}
-  .card.removed  {{ border-left-color: #f44336; }}
-  .card.modified {{ border-left-color: #ffb300; }}
+  .card.added       {{ border-left-color: #4caf50; }}
+  .card.removed     {{ border-left-color: #f44336; }}
+  .card.modified    {{ border-left-color: #ffb300; }}
   .card.collections {{ border-left-color: #42a5f5; }}
+  .card.render      {{ border-left-color: #ce93d8; }}
 
   .card-title {{
 	font-weight: 600;
@@ -469,7 +471,7 @@ def _wrap_document(
 </div>
 
 <div class="summary-bar">
-  <span class="summary-pill added">   {summary}</span>
+  <span class="summary-pill added">{summary}</span>
 </div>
 
 {body_html}

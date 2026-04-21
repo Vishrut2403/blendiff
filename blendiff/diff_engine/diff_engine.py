@@ -1,30 +1,8 @@
-"""
-blendiff.diff_engine.diff_engine
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Compares two serialised scene dicts and returns a SceneDiff.
-
-Design decisions
-----------------
-* DiffEngine is stateless.  compare() is a pure function.
-* No bpy imports — works entirely on plain Python dicts.
-* Transforms are compared with a configurable epsilon so that
-  floating-point noise does not create false positives.
-* Material slot changes are detected per-slot by index.
-  When node_graph data is present, material_diff.compare_materials()
-  is called to produce per-node, per-socket property changes.
-* Collection hierarchy is compared at the path level.
-
-Extending to new property types
----------------------------------
-1. Add an _objects_diff_* method (or a comparator in _compare_objects).
-2. Call it from _diff_objects_modified() and append any PropertyChange.
-3. That's it.  No other code paths to touch.
-"""
-
 from __future__ import annotations
 
 import math
 from typing import Any
+from blendiff.diff_engine.render_diff import diff_render_settings
 
 from ..data_model.diff import (
 		ChangeKind,
@@ -46,18 +24,7 @@ class DiffEngine:
 		# Public API
 
 		def compare(self, scene_a: dict, scene_b: dict) -> SceneDiff:
-				"""
-				Compare two serialised scenes.
 
-				Parameters
-				----------
-				scene_a, scene_b:
-						Dicts produced by ``SceneSerializer.serialize()``.
-
-				Returns
-				-------
-				SceneDiff
-				"""
 				diff = SceneDiff(
 						scene_name_a=scene_a.get("scene_name", "A"),
 						scene_name_b=scene_b.get("scene_name", "B"),
@@ -70,6 +37,10 @@ class DiffEngine:
 				diff.collection_diffs = self._diff_collections(
 						scene_a.get("collections", {}),
 						scene_b.get("collections", {}),
+				)
+				diff.render_diff = diff_render_settings(
+						scene_a.get("render", {}),
+						scene_b.get("render", {}),
 				)
 				return diff
 

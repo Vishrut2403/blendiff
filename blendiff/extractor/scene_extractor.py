@@ -1,27 +1,9 @@
-"""
-blendiff.extractor.scene_extractor
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Reads the active Blender scene via `bpy` and produces a raw Python
-dictionary that mirrors the SerializedScene schema (but still contains
-mathutils types — that is the Serializer's job to clean up).
-
-Design decisions
-----------------
-* SceneExtractor is a stateless class with class-methods.
-  No __init__ needed; nothing is stored between calls.
-* Each extract_* method is independently testable — call only what you need.
-* If a property is missing or raises an exception (e.g. a corrupted
-  data-block), we catch it, log a warning, and substitute a safe default.
-  We never crash the whole extraction for one bad object.
-* Collection hierarchy is walked recursively to capture any depth.
-* Material node trees are extracted via MaterialExtractor when use_nodes
-  is True. Falls back to name-only on any error.
-"""
-
 from __future__ import annotations
 
 import logging
 from typing import Any
+
+from .render_extractor import extract_render_settings
 
 log = logging.getLogger(__name__)
 
@@ -57,6 +39,7 @@ class SceneExtractor:
 						"scene_name":      scene.name,
 						"objects":         cls._extract_all_objects(scene),
 						"collections":     cls._extract_collection_tree(scene.collection),
+						"render":          extract_render_settings(scene),
 				}
 
 		# Object extraction
