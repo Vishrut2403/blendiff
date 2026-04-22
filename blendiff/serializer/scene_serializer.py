@@ -1,29 +1,7 @@
-"""
-blendiff.serializer.scene_serializer
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Converts the raw Python dict produced by SceneExtractor into a fully
-JSON-serialisable dict.
-
-Responsibilities
-----------------
-* Convert mathutils types (Vector, Euler, Quaternion) to list[float].
-* Round floats to a configurable number of decimal places (default 6)
-  to avoid meaningless diff noise from floating-point precision.
-* Guarantee that all values are: str, int, float, bool, None, list, or dict.
-* Return a dict that matches the SerializedScene dataclass schema.
-
-What this module is NOT responsible for
------------------------------------------
-* Knowing anything about Blender internals (no bpy imports).
-* Validating semantic correctness — if the extractor gives us garbage,
-  we serialise the garbage; validation is a separate concern.
-"""
-
 from __future__ import annotations
 
 import math
 from typing import Any
-from unittest import result
 
 # Number of decimal places used when rounding float components.
 # Increase for higher precision; decrease to reduce noise in large scenes.
@@ -45,7 +23,8 @@ class SceneSerializer:
 		Parameters
 		----------
 		raw:
-			Dict with keys: blender_version, scene_name, objects, collections.
+			Dict with keys: blender_version, scene_name, objects,
+			collections, render.
 
 		Returns
 		-------
@@ -63,6 +42,7 @@ class SceneSerializer:
 				path: self._serialize_collection(col_data)
 				for path, col_data in raw.get("collections", {}).items()
 			},
+			"render": self._serialize_render(raw.get("render", {})),
 		}
 
 	# Object serialization
@@ -95,6 +75,39 @@ class SceneSerializer:
 			"node_graph": slot.get("node_graph"),  # None when no nodes
 		}
 		return result
+
+	# Render serialization
+
+	def _serialize_render(self, render: dict) -> dict:
+		"""
+		Render settings are already plain Python primitives from
+		render_extractor (strings, ints, floats, bools) — no mathutils
+		types to convert. Explicitly cast each field for safety.
+		"""
+		if not render:
+			return {}
+		return {
+			"engine":                str(render.get("engine", "")),
+			"resolution_x":         int(render.get("resolution_x", 1920)),
+			"resolution_y":         int(render.get("resolution_y", 1080)),
+			"resolution_percentage":int(render.get("resolution_percentage", 100)),
+			"filepath":             str(render.get("filepath", "")),
+			"file_format":          str(render.get("file_format", "PNG")),
+			"color_mode":           str(render.get("color_mode", "RGBA")),
+			"color_depth":          str(render.get("color_depth", "8")),
+			"frame_start":          int(render.get("frame_start", 1)),
+			"frame_end":            int(render.get("frame_end", 250)),
+			"frame_step":           int(render.get("frame_step", 1)),
+			"fps":                  int(render.get("fps", 24)),
+			"fps_base":             float(render.get("fps_base", 1.0)),
+			"display_device":       str(render.get("display_device", "sRGB")),
+			"view_transform":       str(render.get("view_transform", "Filmic")),
+			"look":                 str(render.get("look", "None")),
+			"exposure":             float(render.get("exposure", 0.0)),
+			"gamma":                float(render.get("gamma", 1.0)),
+			"cycles":               dict(render.get("cycles", {})),
+			"eevee":                dict(render.get("eevee", {})),
+		}
 
 	# Collection serialization
 
