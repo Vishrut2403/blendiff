@@ -1,26 +1,33 @@
 # Python
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
 *.pyd
-*.egg-info/
+.Python
+
+# Packaging
 dist/
 build/
+*.egg-info/
+*.egg
+MANIFEST
+
+# PyPI / Hatch
+.hatch/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
 
 # Blender
+blendiff.zip
 *.blend1
 *.blend2
 
-# Virtual environments
-.venv/
-venv/
-
-# Pytest
-.pytest_cache/
-.coverage
-
-# Zip artifacts
-*.zip
+# OS
+.DS_Store
+Thumbs.db
 
 # IDE
 .vscode/
