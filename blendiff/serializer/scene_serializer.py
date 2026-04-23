@@ -58,6 +58,8 @@ class SceneSerializer:
 				for s in obj.get("material_slots", [])
 			],
 			"visible":         bool(obj.get("visible", True)),
+			"camera_data":     obj.get("camera_data"),
+			"light_data":      obj.get("light_data"),
 		}
 
 	def _serialize_transform(self, t: dict) -> dict:

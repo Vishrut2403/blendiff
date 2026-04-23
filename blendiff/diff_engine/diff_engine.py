@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 from typing import Any
 from blendiff.diff_engine.render_diff import diff_render_settings
+from blendiff.diff_engine.camera_light_diff import diff_camera_data, diff_light_data
 
 from ..data_model.diff import (
 		ChangeKind,
@@ -116,6 +117,21 @@ class DiffEngine:
 								obj_b.get("material_slots", []),
 						)
 				)
+
+				# Camera / light data block changes
+				obj_type = obj_a.get("type")
+				if obj_type == "CAMERA":
+						changes.extend(diff_camera_data(
+								obj_a.get("camera_data"),
+								obj_b.get("camera_data"),
+								prefix="camera",
+						))
+				elif obj_type == "LIGHT":
+						changes.extend(diff_light_data(
+								obj_a.get("light_data"),
+								obj_b.get("light_data"),
+								prefix="light",
+						))
 
 				return changes
 

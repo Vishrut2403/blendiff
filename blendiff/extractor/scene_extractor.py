@@ -4,6 +4,7 @@ import logging
 from typing import Any
 
 from .render_extractor import extract_render_settings
+from .camera_light_extractor import extract_camera_data, extract_light_data
 
 log = logging.getLogger(__name__)
 
@@ -59,14 +60,32 @@ class SceneExtractor:
 		@classmethod
 		def _extract_object(cls, obj: Any) -> dict:
 				"""Extract a single bpy.types.Object."""
-				return {
+				obj_type = obj.type
+
+				data = {
 						"name":             obj.name,
-						"type":             obj.type,
+						"type":             obj_type,
 						"collection_path":  cls._collection_path(obj),
 						"transform":        cls._extract_transform(obj),
 						"material_slots":   cls._extract_material_slots(obj),
 						"visible":          not obj.hide_viewport,
+						"camera_data":      None,
+						"light_data":       None,
 				}
+
+				if obj_type == "CAMERA":
+						try:
+								data["camera_data"] = extract_camera_data(obj)
+						except Exception as exc:
+								log.warning("Failed to extract camera data for %r: %s", obj.name, exc)
+
+				elif obj_type == "LIGHT":
+						try:
+								data["light_data"] = extract_light_data(obj)
+						except Exception as exc:
+								log.warning("Failed to extract light data for %r: %s", obj.name, exc)
+
+				return data
 
 		@classmethod
 		def _extract_transform(cls, obj: Any) -> dict:
