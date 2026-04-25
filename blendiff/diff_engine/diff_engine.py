@@ -4,6 +4,7 @@ import math
 from typing import Any
 from blendiff.diff_engine.render_diff import diff_render_settings
 from blendiff.diff_engine.camera_light_diff import diff_camera_data, diff_light_data
+from blendiff.diff_engine.mesh_diff import diff_mesh_data
 
 from ..data_model.diff import (
 		ChangeKind,
@@ -14,15 +15,13 @@ from ..data_model.diff import (
 )
 from .material_diff import compare_materials
 
-_DEFAULT_EPSILON = 1e-4   # tolerance for float comparisons
+_DEFAULT_EPSILON = 1e-4
 
 
 class DiffEngine:
 
 		def __init__(self, epsilon: float = _DEFAULT_EPSILON) -> None:
 				self._eps = epsilon
-
-		# Public API
 
 		def compare(self, scene_a: dict, scene_b: dict) -> SceneDiff:
 
@@ -45,8 +44,6 @@ class DiffEngine:
 				)
 				return diff
 
-		# Object diffing
-
 		def _diff_objects(
 				self,
 				objs_a: dict[str, dict],
@@ -57,15 +54,12 @@ class DiffEngine:
 				keys_a = set(objs_a)
 				keys_b = set(objs_b)
 
-				# Added objects (present in B, absent in A)
 				for name in sorted(keys_b - keys_a):
 						results.append(ObjectDiff(name=name, kind=ChangeKind.ADDED))
 
-				# Removed objects (present in A, absent in B)
 				for name in sorted(keys_a - keys_b):
 						results.append(ObjectDiff(name=name, kind=ChangeKind.REMOVED))
 
-				# Potentially modified objects (present in both)
 				for name in sorted(keys_a & keys_b):
 						changes = self._compare_objects(objs_a[name], objs_b[name])
 						if changes:
@@ -78,7 +72,6 @@ class DiffEngine:
 		def _compare_objects(self, obj_a: dict, obj_b: dict) -> list[PropertyChange]:
 				changes: list[PropertyChange] = []
 
-				# Type change (rare but possible: e.g. empty → mesh)
 				if obj_a.get("type") != obj_b.get("type"):
 						changes.append(PropertyChange(
 								property_path="type",
@@ -86,7 +79,6 @@ class DiffEngine:
 								new_value=obj_b.get("type"),
 						))
 
-				# Collection membership change
 				if obj_a.get("collection_path") != obj_b.get("collection_path"):
 						changes.append(PropertyChange(
 								property_path="collection_path",
@@ -94,7 +86,6 @@ class DiffEngine:
 								new_value=obj_b.get("collection_path"),
 						))
 
-				# Visibility change
 				if obj_a.get("visible") != obj_b.get("visible"):
 						changes.append(PropertyChange(
 								property_path="visible",
@@ -102,7 +93,6 @@ class DiffEngine:
 								new_value=obj_b.get("visible"),
 						))
 
-				# Transform changes
 				changes.extend(
 						self._compare_transforms(
 								obj_a.get("transform", {}),
@@ -110,7 +100,6 @@ class DiffEngine:
 						)
 				)
 
-				# Material slot changes (including node graphs)
 				changes.extend(
 						self._compare_material_slots(
 								obj_a.get("material_slots", []),
@@ -118,7 +107,6 @@ class DiffEngine:
 						)
 				)
 
-				# Camera / light data block changes
 				obj_type = obj_a.get("type")
 				if obj_type == "CAMERA":
 						changes.extend(diff_camera_data(
@@ -132,10 +120,14 @@ class DiffEngine:
 								obj_b.get("light_data"),
 								prefix="light",
 						))
+				elif obj_type == "MESH":
+						changes.extend(diff_mesh_data(
+								obj_a.get("mesh_data"),
+								obj_b.get("mesh_data"),
+								prefix="mesh",
+						))
 
 				return changes
-
-		# Transform diffing
 
 		def _compare_transforms(
 				self, t_a: dict, t_b: dict
@@ -153,12 +145,9 @@ class DiffEngine:
 				return changes
 
 		def _vecs_equal(self, a: list[float], b: list[float]) -> bool:
-				"""Component-wise comparison with epsilon."""
 				if len(a) != len(b):
 						return False
 				return all(math.isclose(x, y, abs_tol=self._eps) for x, y in zip(a, b))
-
-		# Material slot diffing
 
 		def _compare_material_slots(
 				self,
@@ -167,7 +156,6 @@ class DiffEngine:
 		) -> list[PropertyChange]:
 				changes: list[PropertyChange] = []
 
-				# Index into slots by slot index for O(1) lookup
 				map_a = {s["index"]: s for s in slots_a}
 				map_b = {s["index"]: s for s in slots_b}
 
@@ -178,34 +166,28 @@ class DiffEngine:
 						slot_b = map_b.get(idx)
 
 						if slot_a is None:
-								# Slot added
 								changes.append(PropertyChange(
 										property_path=f"material_slots[{idx}]",
 										old_value=None,
 										new_value=slot_b.get("name"),
 								))
 						elif slot_b is None:
-								# Slot removed
 								changes.append(PropertyChange(
 										property_path=f"material_slots[{idx}]",
 										old_value=slot_a.get("name"),
 										new_value=None,
 								))
 						else:
-								# Slot present on both sides
 								name_a = slot_a.get("name")
 								name_b = slot_b.get("name")
 
 								if name_a != name_b:
-										# Material itself swapped out
 										changes.append(PropertyChange(
 												property_path=f"material_slots[{idx}].name",
 												old_value=name_a,
 												new_value=name_b,
 										))
 
-								# Node graph diff — only when same material on both sides
-								# (if material swapped, the node diff is noise)
 								if name_a == name_b and name_a is not None:
 										graph_a = slot_a.get("node_graph")
 										graph_b = slot_b.get("node_graph")
@@ -220,8 +202,6 @@ class DiffEngine:
 												changes.extend(node_changes)
 
 				return changes
-
-		# Collection diffing
 
 		def _diff_collections(
 				self,

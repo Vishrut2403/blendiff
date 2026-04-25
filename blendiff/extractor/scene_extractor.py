@@ -5,188 +5,198 @@ from typing import Any
 
 from .render_extractor import extract_render_settings
 from .camera_light_extractor import extract_camera_data, extract_light_data
+from .mesh_extractor import extract_mesh_data
 
 log = logging.getLogger(__name__)
 
 
 class SceneExtractor:
-		"""Extract structured scene data from the active Blender scene."""
+	"""Extract structured scene data from the active Blender scene."""
 
-		# Public API
+	# Public API
 
-		@classmethod
-		def extract(cls, context: Any) -> dict:
-				"""
-				Full scene extraction.
+	@classmethod
+	def extract(cls, context: Any) -> dict:
+		"""
+		Full scene extraction.
 
-				Parameters
-				----------
-				context:
-						A ``bpy.context``-like object with a ``scene`` attribute.
+		Parameters
+		----------
+		context:
+			A ``bpy.context``-like object with a ``scene`` attribute.
 
-				Returns
-				-------
-				dict
-						Raw scene dict.  Keys match SerializedScene field names.
-						Values may still contain mathutils types.
-				"""
-				import bpy  # local import keeps module importable outside Blender
+		Returns
+		-------
+		dict
+			Raw scene dict.  Keys match SerializedScene field names.
+			Values may still contain mathutils types.
+		"""
+		import bpy  # local import keeps module importable outside Blender
 
-				scene = context.scene
-				version = bpy.app.version_string
+		scene = context.scene
+		version = bpy.app.version_string
 
-				return {
-						"blender_version": version,
-						"scene_name":      scene.name,
-						"objects":         cls._extract_all_objects(scene),
-						"collections":     cls._extract_collection_tree(scene.collection),
-						"render":          extract_render_settings(scene),
-				}
+		return {
+			"blender_version": version,
+			"scene_name": scene.name,
+			"objects": cls._extract_all_objects(scene),
+			"collections": cls._extract_collection_tree(scene.collection),
+			"render": extract_render_settings(scene),
+		}
 
-		# Object extraction
+	# Object extraction
 
-		@classmethod
-		def _extract_all_objects(cls, scene: Any) -> dict[str, dict]:
-				"""Return a dict keyed by object name."""
-				result: dict[str, dict] = {}
-				for obj in scene.objects:
-						try:
-								data = cls._extract_object(obj)
-								result[obj.name] = data
-						except Exception as exc:
-								log.warning("Failed to extract object %r: %s", obj.name, exc)
-				return result
+	@classmethod
+	def _extract_all_objects(cls, scene: Any) -> dict[str, dict]:
+		"""Return a dict keyed by object name."""
+		result: dict[str, dict] = {}
+		for obj in scene.objects:
+			try:
+				data = cls._extract_object(obj)
+				result[obj.name] = data
+			except Exception as exc:
+				log.warning("Failed to extract object %r: %s", obj.name, exc)
+		return result
 
-		@classmethod
-		def _extract_object(cls, obj: Any) -> dict:
-				"""Extract a single bpy.types.Object."""
-				obj_type = obj.type
+	@classmethod
+	def _extract_object(cls, obj: Any) -> dict:
+		"""Extract a single bpy.types.Object."""
+		obj_type = obj.type
 
-				data = {
-						"name":             obj.name,
-						"type":             obj_type,
-						"collection_path":  cls._collection_path(obj),
-						"transform":        cls._extract_transform(obj),
-						"material_slots":   cls._extract_material_slots(obj),
-						"visible":          not obj.hide_viewport,
-						"camera_data":      None,
-						"light_data":       None,
-				}
+		data = {
+			"name": obj.name,
+			"type": obj_type,
+			"collection_path": cls._collection_path(obj),
+			"transform": cls._extract_transform(obj),
+			"material_slots": cls._extract_material_slots(obj),
+			"visible": not obj.hide_viewport,
+			"camera_data": None,
+			"light_data": None,
+			"mesh_data": None,
+		}
 
-				if obj_type == "CAMERA":
-						try:
-								data["camera_data"] = extract_camera_data(obj)
-						except Exception as exc:
-								log.warning("Failed to extract camera data for %r: %s", obj.name, exc)
+		if obj_type == "CAMERA":
+			try:
+				data["camera_data"] = extract_camera_data(obj)
+			except Exception as exc:
+				log.warning("Failed to extract camera data for %r: %s", obj.name, exc)
 
-				elif obj_type == "LIGHT":
-						try:
-								data["light_data"] = extract_light_data(obj)
-						except Exception as exc:
-								log.warning("Failed to extract light data for %r: %s", obj.name, exc)
+		elif obj_type == "LIGHT":
+			try:
+				data["light_data"] = extract_light_data(obj)
+			except Exception as exc:
+				log.warning("Failed to extract light data for %r: %s", obj.name, exc)
 
-				return data
+		elif obj_type == "MESH":
+			try:
+				data["mesh_data"] = extract_mesh_data(obj)
+			except Exception as exc:
+				log.warning("Failed to extract mesh data for %r: %s", obj.name, exc)
 
-		@classmethod
-		def _extract_transform(cls, obj: Any) -> dict:
-				"""
-				Extract world-space transform.
+		return data
 
-				We use world_matrix decompose() so the values are consistent
-				regardless of parenting.  Returns mathutils types — Serializer
-				converts them to lists.
-				"""
-				loc, rot, scale = obj.matrix_world.decompose()
-				return {
-						"location":       loc,
-						"rotation_euler": rot.to_euler(),   # convert quaternion → Euler
-						"scale":          scale,
-				}
+	@classmethod
+	def _extract_transform(cls, obj: Any) -> dict:
+		"""
+		Extract world-space transform.
 
-		@classmethod
-		def _extract_material_slots(cls, obj: Any) -> list[dict]:
-				"""
-				Extract material slots, including node graph data when available.
-				Falls back to name-only if node extraction fails.
-				"""
-				from .material_extractor import MaterialExtractor
+		We use world_matrix decompose() so the values are consistent
+		regardless of parenting.  Returns mathutils types — Serializer
+		converts them to lists.
+		"""
+		loc, rot, scale = obj.matrix_world.decompose()
+		return {
+			"location": loc,
+			"rotation_euler": rot.to_euler(),  # convert quaternion → Euler
+			"scale": scale,
+		}
 
-				slots = []
-				for i, slot in enumerate(obj.material_slots):
-						mat = slot.material
-						slot_data: dict = {
-								"index":     i,
-								"name":      mat.name if mat else None,
-								"use_nodes": mat.use_nodes if mat else None,
-						}
+	@classmethod
+	def _extract_material_slots(cls, obj: Any) -> list[dict]:
+		"""
+		Extract material slots, including node graph data when available.
+		Falls back to name-only if node extraction fails.
+		"""
+		from .material_extractor import MaterialExtractor
 
-						# Extract node graph when material uses nodes
-						if mat and mat.use_nodes:
-								try:
-										slot_data["node_graph"] = MaterialExtractor.extract(mat)
-								except Exception as exc:
-										log.warning(
-												"Failed to extract node graph for material %r "
-												"on object %r: %s",
-												mat.name, obj.name, exc,
-										)
-										slot_data["node_graph"] = None
-						else:
-								slot_data["node_graph"] = None
+		slots = []
+		for i, slot in enumerate(obj.material_slots):
+			mat = slot.material
+			slot_data: dict = {
+				"index": i,
+				"name": mat.name if mat else None,
+				"use_nodes": mat.use_nodes if mat else None,
+			}
 
-						slots.append(slot_data)
-				return slots
+			# Extract node graph when material uses nodes
+			if mat and mat.use_nodes:
+				try:
+					slot_data["node_graph"] = MaterialExtractor.extract(mat)
+				except Exception as exc:
+					log.warning(
+						"Failed to extract node graph for material %r "
+						"on object %r: %s",
+						mat.name,
+						obj.name,
+						exc,
+					)
+					slot_data["node_graph"] = None
+			else:
+				slot_data["node_graph"] = None
 
-		# Collection extraction
+			slots.append(slot_data)
+		return slots
 
-		@classmethod
-		def _extract_collection_tree(
-				cls,
-				collection: Any,
-				parent_path: str = "",
-		) -> dict[str, dict]:
-				"""
-				Recursively walk the collection hierarchy.
+	# Collection extraction
 
-				Returns a flat dict keyed by full collection path so the caller
-				can look up any collection in O(1) without walking the tree again.
-				"""
-				result: dict[str, dict] = {}
-				cls._walk_collection(collection, parent_path, result)
-				return result
+	@classmethod
+	def _extract_collection_tree(
+		cls,
+		collection: Any,
+		parent_path: str = "",
+	) -> dict[str, dict]:
+		"""
+		Recursively walk the collection hierarchy.
 
-		@classmethod
-		def _walk_collection(
-				cls,
-				collection: Any,
-				parent_path: str,
-				accumulator: dict[str, dict],
-		) -> None:
-				path = (
-						f"{parent_path}/{collection.name}"
-						if parent_path
-						else collection.name
-				)
-				node = {
-						"name":     collection.name,
-						"path":     path,
-						"children": [c.name for c in collection.children],
-						"objects":  [o.name for o in collection.objects],
-				}
-				accumulator[path] = node
-				for child in collection.children:
-						cls._walk_collection(child, path, accumulator)
+		Returns a flat dict keyed by full collection path so the caller
+		can look up any collection in O(1) without walking the tree again.
+		"""
+		result: dict[str, dict] = {}
+		cls._walk_collection(collection, parent_path, result)
+		return result
 
-		# Helpers
+	@classmethod
+	def _walk_collection(
+		cls,
+		collection: Any,
+		parent_path: str,
+		accumulator: dict[str, dict],
+	) -> None:
+		path = (
+			f"{parent_path}/{collection.name}"
+			if parent_path
+			else collection.name
+		)
+		node = {
+			"name": collection.name,
+			"path": path,
+			"children": [c.name for c in collection.children],
+			"objects": [o.name for o in collection.objects],
+		}
+		accumulator[path] = node
+		for child in collection.children:
+			cls._walk_collection(child, path, accumulator)
 
-		@classmethod
-		def _collection_path(cls, obj: Any) -> str:
-				"""
-				Return the path of the *first* collection that directly contains obj.
+	# Helpers
 
-				Blender objects can live in multiple collections, but for diff
-				purposes we track the primary one.  If none found, return "".
-				"""
-				for col in obj.users_collection:
-						return col.name
-				return ""
+	@classmethod
+	def _collection_path(cls, obj: Any) -> str:
+		"""
+		Return the path of the *first* collection that directly contains obj.
+
+		Blender objects can live in multiple collections, but for diff
+		purposes we track the primary one.  If none found, return "".
+		"""
+		for col in obj.users_collection:
+			return col.name
+		return ""

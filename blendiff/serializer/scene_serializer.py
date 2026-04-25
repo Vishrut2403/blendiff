@@ -3,8 +3,6 @@ from __future__ import annotations
 import math
 from typing import Any
 
-# Number of decimal places used when rounding float components.
-# Increase for higher precision; decrease to reduce noise in large scenes.
 _FLOAT_PRECISION = 6
 
 
@@ -14,23 +12,7 @@ class SceneSerializer:
 	def __init__(self, float_precision: int = _FLOAT_PRECISION) -> None:
 		self._precision = float_precision
 
-	# Public API
-
 	def serialize(self, raw: dict) -> dict:
-		"""
-		Normalise a raw scene dict (as returned by SceneExtractor).
-
-		Parameters
-		----------
-		raw:
-			Dict with keys: blender_version, scene_name, objects,
-			collections, render.
-
-		Returns
-		-------
-		dict
-			Fully JSON-serialisable dict.
-		"""
 		return {
 			"blender_version": raw["blender_version"],
 			"scene_name":      raw["scene_name"],
@@ -45,8 +27,6 @@ class SceneSerializer:
 			"render": self._serialize_render(raw.get("render", {})),
 		}
 
-	# Object serialization
-
 	def _serialize_object(self, obj: dict) -> dict:
 		return {
 			"name":            obj["name"],
@@ -60,6 +40,7 @@ class SceneSerializer:
 			"visible":         bool(obj.get("visible", True)),
 			"camera_data":     obj.get("camera_data"),
 			"light_data":      obj.get("light_data"),
+			"mesh_data":       obj.get("mesh_data"),   # already plain primitives
 		}
 
 	def _serialize_transform(self, t: dict) -> dict:
@@ -74,18 +55,11 @@ class SceneSerializer:
 			"index":     int(slot["index"]),
 			"name":      slot["name"],
 			"use_nodes": slot["use_nodes"],
-			"node_graph": slot.get("node_graph"),  # None when no nodes
+			"node_graph": slot.get("node_graph"),
 		}
 		return result
 
-	# Render serialization
-
 	def _serialize_render(self, render: dict) -> dict:
-		"""
-		Render settings are already plain Python primitives from
-		render_extractor (strings, ints, floats, bools) — no mathutils
-		types to convert. Explicitly cast each field for safety.
-		"""
 		if not render:
 			return {}
 		return {
@@ -111,8 +85,6 @@ class SceneSerializer:
 			"eevee":                dict(render.get("eevee", {})),
 		}
 
-	# Collection serialization
-
 	def _serialize_collection(self, col: dict) -> dict:
 		return {
 			"name":     col["name"],
@@ -121,28 +93,14 @@ class SceneSerializer:
 			"objects":  list(col.get("objects", [])),
 		}
 
-	# Type normalisation helpers
-
 	def _vec_to_list(self, value: Any) -> list[float]:
-		"""
-		Convert any vector-like object (mathutils.Vector, Euler, list,
-		tuple) to a list of rounded floats.
-
-		Handles:
-		- mathutils.Vector / Euler / Quaternion  (iterable, len 3 or 4)
-		- Plain Python list / tuple
-		- A single float (length-1 vector)
-		"""
 		try:
 			components = list(value)
 		except TypeError:
-			# Scalar fallback
 			components = [value]
-
 		return [self._round(c) for c in components]
 
 	def _round(self, value: Any) -> float:
-		"""Round a numeric value; handle NaN/Inf gracefully."""
 		try:
 			f = float(value)
 		except (TypeError, ValueError):
