@@ -8,12 +8,12 @@ When imported inside Blender, the full addon registers its UI panels and
 operators on top of the core.
 """
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 bl_info = {
 	"name":        "BlenDiff",
 	"author":      "Vishrut",
-	"version":     (0, 2, 0),
+	"version":     (0, 3, 0),
 	"blender":     (3, 6, 0),
 	"location":    "3D Viewport > Sidebar > BlenDiff",
 	"description": "Semantic scene diff, snapshot history, and assisted merge for .blend files",
