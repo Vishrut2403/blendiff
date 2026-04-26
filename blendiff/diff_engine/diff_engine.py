@@ -6,6 +6,7 @@ from blendiff.diff_engine.render_diff import diff_render_settings
 from blendiff.diff_engine.camera_light_diff import diff_camera_data, diff_light_data
 from blendiff.diff_engine.mesh_diff import diff_mesh_data
 from blendiff.diff_engine.world_diff import diff_world_data
+from blendiff.diff_engine.modifier_diff import diff_modifier_stack
 
 from ..data_model.diff import (
 		ChangeKind,
@@ -111,6 +112,13 @@ class DiffEngine:
 								obj_b.get("material_slots", []),
 						)
 				)
+
+				# Modifier stack — applies to all object types
+				changes.extend(diff_modifier_stack(
+						obj_a.get("modifier_stack", []),
+						obj_b.get("modifier_stack", []),
+						prefix="modifiers",
+				))
 
 				obj_type = obj_a.get("type")
 				if obj_type == "CAMERA":

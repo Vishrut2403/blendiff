@@ -7,6 +7,7 @@ from .render_extractor import extract_render_settings
 from .camera_light_extractor import extract_camera_data, extract_light_data
 from .mesh_extractor import extract_mesh_data
 from .world_extractor import extract_world_data
+from .modifier_extractor import extract_modifier_stack
 
 log = logging.getLogger(__name__)
 
@@ -75,7 +76,14 @@ class SceneExtractor:
 			"camera_data":     None,
 			"light_data":      None,
 			"mesh_data":       None,
+			"modifier_stack":  [],
 		}
+
+		# Modifiers exist on all object types
+		try:
+			data["modifier_stack"] = extract_modifier_stack(obj)
+		except Exception as exc:
+			log.warning("Failed to extract modifiers for %r: %s", obj.name, exc)
 
 		if obj_type == "CAMERA":
 			try:

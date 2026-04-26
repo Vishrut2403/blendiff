@@ -42,6 +42,8 @@ class SceneSerializer:
 			"camera_data":     obj.get("camera_data"),
 			"light_data":      obj.get("light_data"),
 			"mesh_data":       obj.get("mesh_data"),
+			# modifier_stack is already plain primitives — pass through directly
+			"modifier_stack":  obj.get("modifier_stack", []),
 		}
 
 	def _serialize_transform(self, t: dict) -> dict:
@@ -53,9 +55,9 @@ class SceneSerializer:
 
 	def _serialize_material_slot(self, slot: dict) -> dict:
 		return {
-			"index":     int(slot["index"]),
-			"name":      slot["name"],
-			"use_nodes": slot["use_nodes"],
+			"index":      int(slot["index"]),
+			"name":       slot["name"],
+			"use_nodes":  slot["use_nodes"],
 			"node_graph": slot.get("node_graph"),
 		}
 
@@ -86,11 +88,6 @@ class SceneSerializer:
 		}
 
 	def _serialize_world(self, world: dict | None) -> dict | None:
-		"""
-		World data is already plain Python primitives from world_extractor
-		— strings, ints, floats, bools, lists of floats.
-		Explicitly cast each field for safety.
-		"""
 		if not world:
 			return None
 		result: dict = {
@@ -110,7 +107,6 @@ class SceneSerializer:
 				if world.get("hdri_strength") is not None else None
 			),
 		}
-		# background_color is [r, g, b, a]
 		bg = world.get("background_color")
 		result["background_color"] = [float(v) for v in bg] if bg is not None else None
 		return result

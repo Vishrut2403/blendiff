@@ -1,20 +1,3 @@
-"""
-blendiff.data_model.scene
-~~~~~~~~~~~~~~~~~~~~~~~~~
-Dataclasses that define the canonical shape of a serialised Blender scene.
-
-Rules:
-  - No bpy imports here.  This module must be importable outside Blender.
-  - All field types must be JSON-serialisable primitives or other dataclasses.
-  - Optional fields default to None; list fields default to [].
-
-Adding a new tracked property:
-  1. Add a field here.
-  2. Teach the extractor to populate it.
-  3. Teach the serializer to normalise it (if needed).
-  4. Teach the diff engine to compare it.
-"""
-
 from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
