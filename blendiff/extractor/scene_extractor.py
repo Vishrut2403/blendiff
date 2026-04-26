@@ -6,6 +6,7 @@ from typing import Any
 from .render_extractor import extract_render_settings
 from .camera_light_extractor import extract_camera_data, extract_light_data
 from .mesh_extractor import extract_mesh_data
+from .world_extractor import extract_world_data
 
 log = logging.getLogger(__name__)
 
@@ -38,10 +39,11 @@ class SceneExtractor:
 
 		return {
 			"blender_version": version,
-			"scene_name": scene.name,
-			"objects": cls._extract_all_objects(scene),
-			"collections": cls._extract_collection_tree(scene.collection),
-			"render": extract_render_settings(scene),
+			"scene_name":      scene.name,
+			"objects":         cls._extract_all_objects(scene),
+			"collections":     cls._extract_collection_tree(scene.collection),
+			"render":          extract_render_settings(scene),
+			"world":           extract_world_data(scene),
 		}
 
 	# Object extraction
@@ -64,15 +66,15 @@ class SceneExtractor:
 		obj_type = obj.type
 
 		data = {
-			"name": obj.name,
-			"type": obj_type,
+			"name":            obj.name,
+			"type":            obj_type,
 			"collection_path": cls._collection_path(obj),
-			"transform": cls._extract_transform(obj),
-			"material_slots": cls._extract_material_slots(obj),
-			"visible": not obj.hide_viewport,
-			"camera_data": None,
-			"light_data": None,
-			"mesh_data": None,
+			"transform":       cls._extract_transform(obj),
+			"material_slots":  cls._extract_material_slots(obj),
+			"visible":         not obj.hide_viewport,
+			"camera_data":     None,
+			"light_data":      None,
+			"mesh_data":       None,
 		}
 
 		if obj_type == "CAMERA":
@@ -106,9 +108,9 @@ class SceneExtractor:
 		"""
 		loc, rot, scale = obj.matrix_world.decompose()
 		return {
-			"location": loc,
+			"location":       loc,
 			"rotation_euler": rot.to_euler(),  # convert quaternion → Euler
-			"scale": scale,
+			"scale":          scale,
 		}
 
 	@classmethod
@@ -123,8 +125,8 @@ class SceneExtractor:
 		for i, slot in enumerate(obj.material_slots):
 			mat = slot.material
 			slot_data: dict = {
-				"index": i,
-				"name": mat.name if mat else None,
+				"index":     i,
+				"name":      mat.name if mat else None,
 				"use_nodes": mat.use_nodes if mat else None,
 			}
 
@@ -178,10 +180,10 @@ class SceneExtractor:
 			else collection.name
 		)
 		node = {
-			"name": collection.name,
-			"path": path,
+			"name":     collection.name,
+			"path":     path,
 			"children": [c.name for c in collection.children],
-			"objects": [o.name for o in collection.objects],
+			"objects":  [o.name for o in collection.objects],
 		}
 		accumulator[path] = node
 		for child in collection.children:

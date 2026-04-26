@@ -5,6 +5,7 @@ from typing import Any
 from blendiff.diff_engine.render_diff import diff_render_settings
 from blendiff.diff_engine.camera_light_diff import diff_camera_data, diff_light_data
 from blendiff.diff_engine.mesh_diff import diff_mesh_data
+from blendiff.diff_engine.world_diff import diff_world_data
 
 from ..data_model.diff import (
 		ChangeKind,
@@ -41,6 +42,10 @@ class DiffEngine:
 				diff.render_diff = diff_render_settings(
 						scene_a.get("render", {}),
 						scene_b.get("render", {}),
+				)
+				diff.world_diff = diff_world_data(
+						scene_a.get("world"),
+						scene_b.get("world"),
 				)
 				return diff
 

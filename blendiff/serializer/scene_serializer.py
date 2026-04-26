@@ -25,6 +25,7 @@ class SceneSerializer:
 				for path, col_data in raw.get("collections", {}).items()
 			},
 			"render": self._serialize_render(raw.get("render", {})),
+			"world":  self._serialize_world(raw.get("world")),
 		}
 
 	def _serialize_object(self, obj: dict) -> dict:
@@ -40,7 +41,7 @@ class SceneSerializer:
 			"visible":         bool(obj.get("visible", True)),
 			"camera_data":     obj.get("camera_data"),
 			"light_data":      obj.get("light_data"),
-			"mesh_data":       obj.get("mesh_data"),   # already plain primitives
+			"mesh_data":       obj.get("mesh_data"),
 		}
 
 	def _serialize_transform(self, t: dict) -> dict:
@@ -51,13 +52,12 @@ class SceneSerializer:
 		}
 
 	def _serialize_material_slot(self, slot: dict) -> dict:
-		result = {
+		return {
 			"index":     int(slot["index"]),
 			"name":      slot["name"],
 			"use_nodes": slot["use_nodes"],
 			"node_graph": slot.get("node_graph"),
 		}
-		return result
 
 	def _serialize_render(self, render: dict) -> dict:
 		if not render:
@@ -84,6 +84,36 @@ class SceneSerializer:
 			"cycles":               dict(render.get("cycles", {})),
 			"eevee":                dict(render.get("eevee", {})),
 		}
+
+	def _serialize_world(self, world: dict | None) -> dict | None:
+		"""
+		World data is already plain Python primitives from world_extractor
+		— strings, ints, floats, bools, lists of floats.
+		Explicitly cast each field for safety.
+		"""
+		if not world:
+			return None
+		result: dict = {
+			"name":                str(world.get("name", "")),
+			"use_nodes":           bool(world.get("use_nodes", False)),
+			"color":               [float(v) for v in world.get("color", [0.0, 0.0, 0.0])],
+			"use_ao":              bool(world.get("use_ao", False)),
+			"ao_factor":           float(world.get("ao_factor", 1.0)),
+			"ao_distance":         float(world.get("ao_distance", 10.0)),
+			"background_strength": (
+				float(world["background_strength"])
+				if world.get("background_strength") is not None else None
+			),
+			"hdri_filepath":       world.get("hdri_filepath"),
+			"hdri_strength":       (
+				float(world["hdri_strength"])
+				if world.get("hdri_strength") is not None else None
+			),
+		}
+		# background_color is [r, g, b, a]
+		bg = world.get("background_color")
+		result["background_color"] = [float(v) for v in bg] if bg is not None else None
+		return result
 
 	def _serialize_collection(self, col: dict) -> dict:
 		return {

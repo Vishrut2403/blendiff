@@ -1,13 +1,3 @@
-"""
-blendiff.data_model.diff
-~~~~~~~~~~~~~~~~~~~~~~~~
-Dataclasses for the output produced by DiffEngine.
-
-Design decision: diffs are represented as plain dicts inside the
-dataclasses (not nested dataclasses) so that they can be trivially
-serialised to JSON for reporting or UI display.
-"""
-
 from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
@@ -15,15 +5,15 @@ from typing import Any, Optional, List
 
 
 class ChangeKind(str, Enum):
-	ADDED    = "added"
-	REMOVED  = "removed"
+	ADDED = "added"
+	REMOVED = "removed"
 	MODIFIED = "modified"
 
 
 @dataclass
 class PropertyChange:
 	"""A single property that changed on an object."""
-	property_path: str      # e.g. "transform.location" or "material_slots[0].name"
+	property_path: str  # e.g. "transform.location" or "material_slots[0].name"
 	old_value: Any
 	new_value: Any
 
@@ -48,15 +38,16 @@ class CollectionDiff:
 	kind: ChangeKind
 	changes: list[PropertyChange] = field(default_factory=list)
 
+
 @dataclass
 class RenderDiff:
 	"""All changed render-setting properties between two snapshots."""
 	changes: List[PropertyChange] = field(default_factory=list)
- 
+
 	@property
 	def has_changes(self) -> bool:
 		return len(self.changes) > 0
- 
+
 	def summary(self) -> str:
 		if not self.has_changes:
 			return "Render settings: no changes"
@@ -64,14 +55,30 @@ class RenderDiff:
 		for c in self.changes:
 			lines.append(f"  {c.property_path}: {c.old_value!r} → {c.new_value!r}")
 		return "\n".join(lines)
-	
+
+
+@dataclass
+class WorldDiff:
+	"""All changed world/environment properties between two snapshots."""
+	changes: List[PropertyChange] = field(default_factory=list)
+
+	@property
+	def has_changes(self) -> bool:
+		return len(self.changes) > 0
+
+	def summary(self) -> str:
+		if not self.has_changes:
+			return "World: no changes"
+		lines = [f"World: {len(self.changes)} change(s)"]
+		for c in self.changes:
+			lines.append(f"  {c.property_path}: {c.old_value!r} → {c.new_value!r}")
+		return "\n".join(lines)
 
 
 @dataclass
 class SceneDiff:
 	"""
 	Top-level result returned by DiffEngine.compare().
-
 	Consumers (UI, merge engine, report exporter) should iterate over
 	object_diffs and collection_diffs and never inspect the raw scene
 	snapshots directly.
@@ -80,10 +87,10 @@ class SceneDiff:
 	scene_name_b: str
 	object_diffs: list[ObjectDiff] = field(default_factory=list)
 	collection_diffs: list[CollectionDiff] = field(default_factory=list)
-	render: RenderDiff = field(default_factory=RenderDiff) 
+	render_diff: RenderDiff = field(default_factory=RenderDiff)
+	world_diff: WorldDiff = field(default_factory=WorldDiff)
 
 	# Convenience aggregators
-
 	@property
 	def added_objects(self) -> list[ObjectDiff]:
 		return [d for d in self.object_diffs if d.kind == ChangeKind.ADDED]
@@ -98,12 +105,19 @@ class SceneDiff:
 
 	@property
 	def has_changes(self) -> bool:
-		return bool(self.object_diffs or self.collection_diffs)
+		return bool(
+			self.object_diffs
+			or self.collection_diffs
+			or self.render_diff.has_changes
+			or self.world_diff.has_changes
+		)
 
 	def summary(self) -> dict[str, int]:
 		return {
-			"added":    len(self.added_objects),
-			"removed":  len(self.removed_objects),
+			"added": len(self.added_objects),
+			"removed": len(self.removed_objects),
 			"modified": len(self.modified_objects),
 			"collection_changes": len(self.collection_diffs),
+			"render_changes": len(self.render_diff.changes),
+			"world_changes": len(self.world_diff.changes),
 		}
