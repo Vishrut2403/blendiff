@@ -7,6 +7,7 @@ from blendiff.diff_engine.camera_light_diff import diff_camera_data, diff_light_
 from blendiff.diff_engine.mesh_diff import diff_mesh_data
 from blendiff.diff_engine.world_diff import diff_world_data
 from blendiff.diff_engine.modifier_diff import diff_modifier_stack
+from blendiff.diff_engine.parent_diff import diff_all_parents
 
 from ..data_model.diff import (
 		ChangeKind,
@@ -47,6 +48,10 @@ class DiffEngine:
 				diff.world_diff = diff_world_data(
 						scene_a.get("world"),
 						scene_b.get("world"),
+				)
+				diff.parent_diffs = diff_all_parents(
+						scene_a.get("objects", {}),
+						scene_b.get("objects", {}),
 				)
 				return diff
 

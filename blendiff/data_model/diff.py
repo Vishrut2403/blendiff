@@ -89,6 +89,7 @@ class SceneDiff:
 	collection_diffs: list[CollectionDiff] = field(default_factory=list)
 	render_diff: RenderDiff = field(default_factory=RenderDiff)
 	world_diff: WorldDiff = field(default_factory=WorldDiff)
+	parent_diffs: list = field(default_factory=list)
 
 	# Convenience aggregators
 	@property
@@ -110,6 +111,7 @@ class SceneDiff:
 			or self.collection_diffs
 			or self.render_diff.has_changes
 			or self.world_diff.has_changes
+			or self.parent_diffs
 		)
 
 	def summary(self) -> dict[str, int]:
@@ -120,4 +122,5 @@ class SceneDiff:
 			"collection_changes": len(self.collection_diffs),
 			"render_changes": len(self.render_diff.changes),
 			"world_changes": len(self.world_diff.changes),
+			"parent_changes": len(self.parent_diffs),
 		}

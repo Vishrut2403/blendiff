@@ -1,9 +1,3 @@
-"""
-tests/test_data_model.py
-~~~~~~~~~~~~~~~~~~~~~~~~
-Tests for the data model dataclasses.
-"""
-
 import sys
 import os
 
@@ -27,7 +21,8 @@ class TestSceneDiff:
 		diff = self._make_diff()
 		assert not diff.has_changes
 		assert diff.summary() == {
-			"added": 0, "removed": 0, "modified": 0, "collection_changes": 0
+			"added": 0, "removed": 0, "modified": 0, "collection_changes": 0,
+			"render_changes": 0, "world_changes": 0, "parent_changes": 0
 		}
 
 	def test_added_objects_property(self):

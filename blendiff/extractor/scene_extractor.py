@@ -8,6 +8,8 @@ from .camera_light_extractor import extract_camera_data, extract_light_data
 from .mesh_extractor import extract_mesh_data
 from .world_extractor import extract_world_data
 from .modifier_extractor import extract_modifier_stack
+from .parent_extractor import extract_parent_info
+from .material_extractor import MaterialExtractor
 
 log = logging.getLogger(__name__)
 
@@ -19,20 +21,7 @@ class SceneExtractor:
 
 	@classmethod
 	def extract(cls, context: Any) -> dict:
-		"""
-		Full scene extraction.
-
-		Parameters
-		----------
-		context:
-			A ``bpy.context``-like object with a ``scene`` attribute.
-
-		Returns
-		-------
-		dict
-			Raw scene dict.  Keys match SerializedScene field names.
-			Values may still contain mathutils types.
-		"""
+		
 		import bpy  # local import keeps module importable outside Blender
 
 		scene = context.scene
@@ -73,6 +62,7 @@ class SceneExtractor:
 			"transform":       cls._extract_transform(obj),
 			"material_slots":  cls._extract_material_slots(obj),
 			"visible":         not obj.hide_viewport,
+			"parent":          None,
 			"camera_data":     None,
 			"light_data":      None,
 			"mesh_data":       None,
@@ -107,13 +97,7 @@ class SceneExtractor:
 
 	@classmethod
 	def _extract_transform(cls, obj: Any) -> dict:
-		"""
-		Extract world-space transform.
 
-		We use world_matrix decompose() so the values are consistent
-		regardless of parenting.  Returns mathutils types — Serializer
-		converts them to lists.
-		"""
 		loc, rot, scale = obj.matrix_world.decompose()
 		return {
 			"location":       loc,
@@ -123,11 +107,6 @@ class SceneExtractor:
 
 	@classmethod
 	def _extract_material_slots(cls, obj: Any) -> list[dict]:
-		"""
-		Extract material slots, including node graph data when available.
-		Falls back to name-only if node extraction fails.
-		"""
-		from .material_extractor import MaterialExtractor
 
 		slots = []
 		for i, slot in enumerate(obj.material_slots):
@@ -165,12 +144,7 @@ class SceneExtractor:
 		collection: Any,
 		parent_path: str = "",
 	) -> dict[str, dict]:
-		"""
-		Recursively walk the collection hierarchy.
-
-		Returns a flat dict keyed by full collection path so the caller
-		can look up any collection in O(1) without walking the tree again.
-		"""
+		
 		result: dict[str, dict] = {}
 		cls._walk_collection(collection, parent_path, result)
 		return result
@@ -201,12 +175,6 @@ class SceneExtractor:
 
 	@classmethod
 	def _collection_path(cls, obj: Any) -> str:
-		"""
-		Return the path of the *first* collection that directly contains obj.
-
-		Blender objects can live in multiple collections, but for diff
-		purposes we track the primary one.  If none found, return "".
-		"""
 		for col in obj.users_collection:
 			return col.name
 		return ""
