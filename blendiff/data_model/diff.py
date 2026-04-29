@@ -79,9 +79,6 @@ class WorldDiff:
 class SceneDiff:
 	"""
 	Top-level result returned by DiffEngine.compare().
-	Consumers (UI, merge engine, report exporter) should iterate over
-	object_diffs and collection_diffs and never inspect the raw scene
-	snapshots directly.
 	"""
 	scene_name_a: str
 	scene_name_b: str
@@ -89,9 +86,9 @@ class SceneDiff:
 	collection_diffs: list[CollectionDiff] = field(default_factory=list)
 	render_diff: RenderDiff = field(default_factory=RenderDiff)
 	world_diff: WorldDiff = field(default_factory=WorldDiff)
-	parent_diffs: list = field(default_factory=list)
+	parent_diffs: list = field(default_factory=list)       # list[ParentDiff]
+	constraint_diffs: list = field(default_factory=list)   # list[ConstraintDiff]
 
-	# Convenience aggregators
 	@property
 	def added_objects(self) -> list[ObjectDiff]:
 		return [d for d in self.object_diffs if d.kind == ChangeKind.ADDED]
@@ -112,15 +109,17 @@ class SceneDiff:
 			or self.render_diff.has_changes
 			or self.world_diff.has_changes
 			or self.parent_diffs
+			or self.constraint_diffs
 		)
 
 	def summary(self) -> dict[str, int]:
 		return {
-			"added": len(self.added_objects),
-			"removed": len(self.removed_objects),
-			"modified": len(self.modified_objects),
-			"collection_changes": len(self.collection_diffs),
-			"render_changes": len(self.render_diff.changes),
-			"world_changes": len(self.world_diff.changes),
-			"parent_changes": len(self.parent_diffs),
+			"added":               len(self.added_objects),
+			"removed":             len(self.removed_objects),
+			"modified":            len(self.modified_objects),
+			"collection_changes":  len(self.collection_diffs),
+			"render_changes":      len(self.render_diff.changes),
+			"world_changes":       len(self.world_diff.changes),
+			"parent_changes":      len(self.parent_diffs),
+			"constraint_changes":  len(self.constraint_diffs),
 		}
