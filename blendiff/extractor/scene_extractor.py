@@ -11,6 +11,7 @@ from .modifier_extractor import extract_modifier_stack
 from .parent_extractor import extract_parent_info
 from .material_extractor import MaterialExtractor
 from .constraint_extractor import extract_constraint_stack
+from .custom_prop_extractor import extract_custom_props
 
 log = logging.getLogger(__name__)
 
@@ -69,6 +70,7 @@ class SceneExtractor:
 			"mesh_data":       None,
 			"modifier_stack":  [],
 			"constraint_stack":  [],
+			"custom_props":      {},
 		}
 
 		# Modifiers exist on all object types
@@ -81,6 +83,11 @@ class SceneExtractor:
 			data["constraint_stack"] = extract_constraint_stack(obj)
 		except Exception as exc:
 			log.warning("Failed to extract constraints for %r: %s", obj.name, exc)
+
+		try:
+			data["custom_props"] = extract_custom_props(obj)
+		except Exception as exc:
+			log.warning("Failed to extract custom props for %r: %s", obj.name, exc)
 
 		if obj_type == "CAMERA":
 			try:

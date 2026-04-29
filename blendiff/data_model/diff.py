@@ -86,8 +86,9 @@ class SceneDiff:
 	collection_diffs: list[CollectionDiff] = field(default_factory=list)
 	render_diff: RenderDiff = field(default_factory=RenderDiff)
 	world_diff: WorldDiff = field(default_factory=WorldDiff)
-	parent_diffs: list = field(default_factory=list)       # list[ParentDiff]
-	constraint_diffs: list = field(default_factory=list)   # list[ConstraintDiff]
+	parent_diffs: list = field(default_factory=list)
+	constraint_diffs: list = field(default_factory=list)
+	custom_prop_diffs: list = field(default_factory=list)
 
 	@property
 	def added_objects(self) -> list[ObjectDiff]:
@@ -110,6 +111,7 @@ class SceneDiff:
 			or self.world_diff.has_changes
 			or self.parent_diffs
 			or self.constraint_diffs
+			or self.custom_prop_diffs
 		)
 
 	def summary(self) -> dict[str, int]:
@@ -122,4 +124,5 @@ class SceneDiff:
 			"world_changes":       len(self.world_diff.changes),
 			"parent_changes":      len(self.parent_diffs),
 			"constraint_changes":  len(self.constraint_diffs),
+			"custom_prop_changes": len(self.custom_prop_diffs),
 		}

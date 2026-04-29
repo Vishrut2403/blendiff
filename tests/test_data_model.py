@@ -23,7 +23,7 @@ class TestSceneDiff:
 		assert diff.summary() == {
 			"added": 0, "removed": 0, "modified": 0, "collection_changes": 0,
 			"render_changes": 0, "world_changes": 0, "parent_changes": 0,
-			"constraint_changes": 0,
+			"constraint_changes": 0, "custom_prop_changes": 0,
 		}
 
 	def test_added_objects_property(self):
