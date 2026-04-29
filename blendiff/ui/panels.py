@@ -1,14 +1,3 @@
-"""
-ui/panels.py
-
-BlenDiff sidebar panel — 3D Viewport → N panel → BlenDiff tab.
-
-Sub-panels:
-  BLENDIFF_PT_Main            — capture/diff/clear (legacy in-memory workflow)
-  BLENDIFF_PT_SnapshotHistory — list sidecar snapshots, diff/delete per row
-  BLENDIFF_PT_Results         — display the current diff result
-"""
-
 import json
 import bpy
 

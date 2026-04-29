@@ -1,19 +1,3 @@
-"""
-ui/operators.py
-
-All BlenDiff operators.
-
-Existing operators (untouched behaviour):
-  BLENDIFF_OT_CaptureSnapshot  — capture scene A into wm (in-memory, legacy)
-  BLENDIFF_OT_RunDiff          — diff wm snapshot A against current scene
-  BLENDIFF_OT_ClearResults     — clear wm keys
-
-New sidecar operators:
-  BLENDIFF_OT_SaveSnapshot     — save current scene to .blendiff sidecar
-  BLENDIFF_OT_DiffAgainstSnapshot — diff a sidecar snapshot against current scene
-  BLENDIFF_OT_DeleteSnapshot   — delete a snapshot from the sidecar
-"""
-
 import json
 import bpy
 

@@ -11,27 +11,7 @@ def generate_html(
 	blend_filename: str,
 	exported_at: str | None = None,
 ) -> str:
-	"""
-	Generate a self-contained HTML string from a diff result.
 
-	Parameters
-	----------
-	result:
-		The dict produced by _run_diff_against_dict() — keys:
-		summary, added_objects, removed_objects, modified_objects,
-		collection_diffs, render_changes.
-	snapshot_label:
-		Label of the snapshot being diffed against (shown in the header).
-	blend_filename:
-		Basename of the .blend file (shown in the header).
-	exported_at:
-		ISO timestamp string for the export time. Defaults to now.
-
-	Returns
-	-------
-	str
-		Complete HTML document as a string.
-	"""
 	if exported_at is None:
 		exported_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 

@@ -10,6 +10,7 @@ from blendiff.diff_engine.modifier_diff import diff_modifier_stack
 from blendiff.diff_engine.parent_diff import diff_all_parents
 from blendiff.diff_engine.constraint_diff import diff_all_constraints
 from blendiff.diff_engine.custom_prop_diff import diff_all_custom_props
+from blendiff.diff_engine.fcurve_diff import diff_all_fcurves
 
 from ..data_model.diff import (
 		ChangeKind,
@@ -60,6 +61,10 @@ class DiffEngine:
 						scene_b.get("objects", {}),
 				)
 				diff.custom_prop_diffs = diff_all_custom_props(
+						scene_a.get("objects", {}),
+						scene_b.get("objects", {}),
+				)
+				diff.fcurve_diffs = diff_all_fcurves(
 						scene_a.get("objects", {}),
 						scene_b.get("objects", {}),
 				)
