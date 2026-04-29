@@ -3,7 +3,7 @@ __version__ = "0.3.0"
 bl_info = {
 	"name":        "BlenDiff",
 	"author":      "Vishrut Sachan",
-	"version":     (0, 3, 0),
+	"version":     (0, 4, 0),
 	"blender":     (3, 6, 0),
 	"location":    "3D Viewport > Sidebar > BlenDiff",
 	"description": "Semantic scene diff, snapshot history, and assisted merge for .blend files",

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.0 — 2026-04-29
+
+### Added
+- Parent/child relationship diffing — parent name, parent type, parent bone (critical for rigs)
+- Constraint stack diffing — per-object constraint list, type, influence, target, and 25+ type-specific params covering IK, Copy Location/Rotation/Scale, Track To, Child Of, Floor, Follow Path, Shrinkwrap, Action, and more
+- `SceneDiff.parent_diffs` and `SceneDiff.constraint_diffs` fields
+- `SceneDiff.summary()` now includes `parent_changes` and `constraint_changes` counts
+- `ParentDiff` and `ConstraintDiff` dataclasses with `.summary()` method
+- 71 new tests (28 parent, 43 constraint), total now 574+
+
 ## 0.3.0 — 2026-04-25
 
 ### Added
