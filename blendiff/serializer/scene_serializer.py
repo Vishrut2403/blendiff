@@ -42,8 +42,11 @@ class SceneSerializer:
 			"camera_data":     obj.get("camera_data"),
 			"light_data":      obj.get("light_data"),
 			"mesh_data":       obj.get("mesh_data"),
-			# modifier_stack is already plain primitives — pass through directly
 			"modifier_stack":  obj.get("modifier_stack", []),
+			"parent":           obj.get("parent"),
+			"constraint_stack": obj.get("constraint_stack", []),
+			"custom_props":     obj.get("custom_props", {}),
+			"fcurves":          obj.get("fcurves", []),
 		}
 
 	def _serialize_transform(self, t: dict) -> dict:

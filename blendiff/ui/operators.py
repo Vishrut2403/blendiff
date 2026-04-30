@@ -30,9 +30,9 @@ def _get_sidecar(context) -> SidecarManager:
 
 def _run_diff_against_dict(context, snapshot_dict: dict) -> dict:
 	"""
-	Diff snapshot_dict (a serialised scene dict) against the current scene.
+	Diff snapshot_dict against the current scene.
 	Stores result JSON on wm["blendiff_result"].
-	Returns the SceneDiff summary dict.
+	Returns the result dict.
 	"""
 	current_dict, _ = _extract_current_scene(context)
 
@@ -41,7 +41,12 @@ def _run_diff_against_dict(context, snapshot_dict: dict) -> dict:
 
 	s = diff.summary()
 	result = {
-		"summary": f"Added: {s['added']}  Removed: {s['removed']}  Modified: {s['modified']}  Collections: {s['collection_changes']}",
+		"summary": (
+			f"Added: {s['added']}  Removed: {s['removed']}  "
+			f"Modified: {s['modified']}  Collections: {s['collection_changes']}  "
+			f"Parents: {s['parent_changes']}  Constraints: {s['constraint_changes']}  "
+			f"Custom Props: {s['custom_prop_changes']}  F-Curves: {s['fcurve_changes']}"
+		),
 		"added_objects": [o.name for o in diff.added_objects],
 		"removed_objects": [o.name for o in diff.removed_objects],
 		"modified_objects": [
@@ -72,6 +77,78 @@ def _run_diff_against_dict(context, snapshot_dict: dict) -> dict:
 				],
 			}
 			for cd in diff.collection_diffs
+		],
+		"render_changes": [
+			{
+				"property_path": c.property_path,
+				"old_value": c.old_value,
+				"new_value": c.new_value,
+			}
+			for c in diff.render_diff.changes
+		],
+		"world_changes": [
+			{
+				"property_path": c.property_path,
+				"old_value": c.old_value,
+				"new_value": c.new_value,
+			}
+			for c in diff.world_diff.changes
+		],
+		"parent_diffs": [
+			{
+				"object_name": pd.object_name,
+				"changes": [
+					{
+						"property_path": c.property_path,
+						"old_value": c.old_value,
+						"new_value": c.new_value,
+					}
+					for c in pd.changes
+				],
+			}
+			for pd in diff.parent_diffs
+		],
+		"constraint_diffs": [
+			{
+				"object_name": cd.object_name,
+				"changes": [
+					{
+						"property_path": c.property_path,
+						"old_value": c.old_value,
+						"new_value": c.new_value,
+					}
+					for c in cd.changes
+				],
+			}
+			for cd in diff.constraint_diffs
+		],
+		"custom_prop_diffs": [
+			{
+				"object_name": cpd.object_name,
+				"changes": [
+					{
+						"property_path": c.property_path,
+						"old_value": c.old_value,
+						"new_value": c.new_value,
+					}
+					for c in cpd.changes
+				],
+			}
+			for cpd in diff.custom_prop_diffs
+		],
+		"fcurve_diffs": [
+			{
+				"object_name": fd.object_name,
+				"changes": [
+					{
+						"property_path": c.property_path,
+						"old_value": c.old_value,
+						"new_value": c.new_value,
+					}
+					for c in fd.changes
+				],
+			}
+			for fd in diff.fcurve_diffs
 		],
 	}
 

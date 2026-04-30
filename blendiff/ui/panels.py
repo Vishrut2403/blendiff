@@ -20,7 +20,7 @@ def _get_diff_result(context) -> dict | None:
 		return None
 
 
-# Main panel (legacy in-memory workflow — preserved)
+# Main panel (legacy in-memory workflow)
 
 class BLENDIFF_PT_Main(bpy.types.Panel):
 	bl_label = "BlenDiff"
@@ -33,7 +33,7 @@ class BLENDIFF_PT_Main(bpy.types.Panel):
 		layout = self.layout
 		wm = context.window_manager
 
-		# --- In-memory snapshot workflow ---
+		# In-memory snapshot workflow
 		layout.label(text="Quick Diff (in-memory)", icon="CAMERA_DATA")
 		col = layout.column(align=True)
 		col.operator("blendiff.capture_snapshot", icon="PLUS")
@@ -42,7 +42,7 @@ class BLENDIFF_PT_Main(bpy.types.Panel):
 
 		layout.separator()
 
-		# --- Sidecar snapshot workflow ---
+		# Sidecar snapshot workflow
 		layout.label(text="Snapshot History", icon="DISK_DRIVE")
 		if not bpy.data.filepath:
 			layout.label(text="Save your .blend file first", icon="ERROR")
@@ -133,18 +133,15 @@ class BLENDIFF_PT_Results(bpy.types.Panel):
 			layout.label(text="No diff result available.", icon="INFO")
 			return
 
-		# --- Active snapshot label ---
 		active_label = wm.get("blendiff_active_snapshot_label")
 		if active_label:
 			layout.label(text=f"vs. '{active_label}'", icon="BOOKMARKS")
 
 		layout.operator("blendiff.export_html", icon="EXPORT")
-
-		# --- Summary ---
 		layout.label(text=diff.get("summary", ""), icon="INFO")
 		layout.separator()
 
-		# --- Added objects ---
+		# Added Objects
 		added = diff.get("added_objects", [])
 		if added:
 			box = layout.box()
@@ -152,7 +149,7 @@ class BLENDIFF_PT_Results(bpy.types.Panel):
 			for name in added:
 				box.label(text=f"  + {name}")
 
-		# --- Removed objects ---
+		# Removed Objects
 		removed = diff.get("removed_objects", [])
 		if removed:
 			box = layout.box()
@@ -160,39 +157,121 @@ class BLENDIFF_PT_Results(bpy.types.Panel):
 			for name in removed:
 				box.label(text=f"  - {name}")
 
-		# --- Modified objects ---
+		# Modified Objects
 		modified = diff.get("modified_objects", [])
 		if modified:
 			box = layout.box()
 			box.label(text=f"Modified ({len(modified)})", icon="MODIFIER")
 			for obj in modified:
-				row = box.row()
-				row.label(text=f"  ~ {obj['name']}")
+				box.label(text=f"  ~ {obj['name']}")
 				for change in obj.get("changes", []):
 					sub = box.column()
 					sub.scale_y = 0.8
-					prop = change["property_path"]
-					old = _format_value(change["old_value"])
-					new = _format_value(change["new_value"])
-					sub.label(text=f"      {prop}")
-					sub.label(text=f"        {old}  →  {new}")
+					sub.label(text=f"      {change['property_path']}")
+					sub.label(
+						text=f"        {_format_value(change['old_value'])}  →  {_format_value(change['new_value'])}"
+					)
 
-		# --- Collection diffs ---
+		# Collection Diffs
 		col_diffs = diff.get("collection_diffs", [])
 		if col_diffs:
 			box = layout.box()
 			box.label(text=f"Collections ({len(col_diffs)})", icon="OUTLINER_COLLECTION")
 			for cd in col_diffs:
-				kind = cd["kind"].capitalize()
-				box.label(text=f"  {kind}: {cd['path']}")
+				box.label(text=f"  {cd['kind'].capitalize()}: {cd['path']}")
 				for change in cd.get("changes", []):
 					sub = box.column()
 					sub.scale_y = 0.8
-					prop = change["property_path"]
-					old = _format_value(change["old_value"])
-					new = _format_value(change["new_value"])
-					sub.label(text=f"      {prop}")
-					sub.label(text=f"        {old}  →  {new}")
+					sub.label(text=f"      {change['property_path']}")
+					sub.label(
+						text=f"        {_format_value(change['old_value'])}  →  {_format_value(change['new_value'])}"
+					)
+
+		# Render Changes
+		render_changes = diff.get("render_changes", [])
+		if render_changes:
+			box = layout.box()
+			box.label(text=f"Render Settings ({len(render_changes)})", icon="SCENE")
+			for change in render_changes:
+				sub = box.column()
+				sub.scale_y = 0.8
+				sub.label(text=f"      {change['property_path']}")
+				sub.label(
+					text=f"        {_format_value(change['old_value'])}  →  {_format_value(change['new_value'])}"
+				)
+
+		# World Changes
+		world_changes = diff.get("world_changes", [])
+		if world_changes:
+			box = layout.box()
+			box.label(text=f"World ({len(world_changes)})", icon="WORLD")
+			for change in world_changes:
+				sub = box.column()
+				sub.scale_y = 0.8
+				sub.label(text=f"      {change['property_path']}")
+				sub.label(
+					text=f"        {_format_value(change['old_value'])}  →  {_format_value(change['new_value'])}"
+				)
+
+		# Parent Diffs
+		parent_diffs = diff.get("parent_diffs", [])
+		if parent_diffs:
+			box = layout.box()
+			box.label(text=f"Parent Relationships ({len(parent_diffs)})", icon="BONE_DATA")
+			for pd in parent_diffs:
+				box.label(text=f"  ~ {pd['object_name']}")
+				for change in pd.get("changes", []):
+					sub = box.column()
+					sub.scale_y = 0.8
+					sub.label(text=f"      {change['property_path']}")
+					sub.label(
+						text=f"        {_format_value(change['old_value'])}  →  {_format_value(change['new_value'])}"
+					)
+
+		# Constraint Diffs
+		constraint_diffs = diff.get("constraint_diffs", [])
+		if constraint_diffs:
+			box = layout.box()
+			box.label(text=f"Constraints ({len(constraint_diffs)})", icon="CONSTRAINT")
+			for cd in constraint_diffs:
+				box.label(text=f"  ~ {cd['object_name']}")
+				for change in cd.get("changes", []):
+					sub = box.column()
+					sub.scale_y = 0.8
+					sub.label(text=f"      {change['property_path']}")
+					sub.label(
+						text=f"        {_format_value(change['old_value'])}  →  {_format_value(change['new_value'])}"
+					)
+
+		# Custom Property Diffs
+		custom_prop_diffs = diff.get("custom_prop_diffs", [])
+		if custom_prop_diffs:
+			box = layout.box()
+			box.label(text=f"Custom Properties ({len(custom_prop_diffs)})", icon="PROPERTIES")
+			for cpd in custom_prop_diffs:
+				box.label(text=f"  ~ {cpd['object_name']}")
+				for change in cpd.get("changes", []):
+					sub = box.column()
+					sub.scale_y = 0.8
+					sub.label(text=f"      {change['property_path']}")
+					sub.label(
+						text=f"        {_format_value(change['old_value'])}  →  {_format_value(change['new_value'])}"
+					)
+
+		# F-Curve Diffs
+		fcurve_diffs = diff.get("fcurve_diffs", [])
+		if fcurve_diffs:
+			box = layout.box()
+			box.label(text=f"F-Curves ({len(fcurve_diffs)})", icon="FCURVE")
+			for fd in fcurve_diffs:
+				box.label(text=f"  ~ {fd['object_name']}")
+				for change in fd.get("changes", []):
+					sub = box.column()
+					sub.scale_y = 0.8
+					sub.label(text=f"      {change['property_path']}")
+					sub.label(
+						text=f"        {_format_value(change['old_value'])}  →  {_format_value(change['new_value'])}"
+                )
 
 
 # Value formatting helper  (fixes the material slot dict display bug)

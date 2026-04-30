@@ -15,12 +15,17 @@ def generate_html(
 	if exported_at is None:
 		exported_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-	summary = result.get("summary", "")
-	added = result.get("added_objects", [])
-	removed = result.get("removed_objects", [])
-	modified = result.get("modified_objects", [])
-	col_diffs = result.get("collection_diffs", [])
-	render_changes = result.get("render_changes", [])  # list of PropertyChange dicts
+	summary         = result.get("summary", "")
+	added           = result.get("added_objects", [])
+	removed         = result.get("removed_objects", [])
+	modified        = result.get("modified_objects", [])
+	col_diffs       = result.get("collection_diffs", [])
+	render_changes  = result.get("render_changes", [])
+	world_changes   = result.get("world_changes", [])
+	parent_diffs    = result.get("parent_diffs", [])
+	constraint_diffs   = result.get("constraint_diffs", [])
+	custom_prop_diffs  = result.get("custom_prop_diffs", [])
+	fcurve_diffs       = result.get("fcurve_diffs", [])
 
 	body_parts: list[str] = []
 
@@ -28,40 +33,31 @@ def generate_html(
 	if added:
 		body_parts.append(_section_header("Added Objects", "added", len(added)))
 		for name in added:
-			entry_id = _safe_id(f"added_{name}")
 			body_parts.append(_entry_card(
-				entry_id=entry_id,
-				kind="added",
-				title=f"+ {name}",
-				rows=[],
+				entry_id=_safe_id(f"added_{name}"),
+				kind="added", title=f"+ {name}", rows=[],
 			))
 
 	# Removed objects
 	if removed:
 		body_parts.append(_section_header("Removed Objects", "removed", len(removed)))
 		for name in removed:
-			entry_id = _safe_id(f"removed_{name}")
 			body_parts.append(_entry_card(
-				entry_id=entry_id,
-				kind="removed",
-				title=f"- {name}",
-				rows=[],
+				entry_id=_safe_id(f"removed_{name}"),
+				kind="removed", title=f"- {name}", rows=[],
 			))
 
 	# Modified objects
 	if modified:
 		body_parts.append(_section_header("Modified Objects", "modified", len(modified)))
 		for obj in modified:
-			entry_id = _safe_id(f"modified_{obj['name']}")
 			rows = [
 				_change_row(c["property_path"], c["old_value"], c["new_value"])
 				for c in obj.get("changes", [])
 			]
 			body_parts.append(_entry_card(
-				entry_id=entry_id,
-				kind="modified",
-				title=f"~ {obj['name']}",
-				rows=rows,
+				entry_id=_safe_id(f"modified_{obj['name']}"),
+				kind="modified", title=f"~ {obj['name']}", rows=rows,
 			))
 
 	# Collection diffs
@@ -69,20 +65,17 @@ def generate_html(
 		body_parts.append(_section_header("Collection Changes", "collections", len(col_diffs)))
 		for cd in col_diffs:
 			kind_str = cd.get("kind", "modified")
-			entry_id = _safe_id(f"col_{cd['path']}")
 			prefix = {"added": "+", "removed": "-", "modified": "~"}.get(kind_str, "~")
 			rows = [
 				_change_row(c["property_path"], c["old_value"], c["new_value"])
 				for c in cd.get("changes", [])
 			]
 			body_parts.append(_entry_card(
-				entry_id=entry_id,
-				kind=kind_str,
-				title=f"{prefix} {cd['path']}",
-				rows=rows,
+				entry_id=_safe_id(f"col_{cd['path']}"),
+				kind=kind_str, title=f"{prefix} {cd['path']}", rows=rows,
 			))
 
-	# Render settings diff
+	# Render settings
 	if render_changes:
 		body_parts.append(_section_header("Render Settings", "render", len(render_changes)))
 		rows = [
@@ -91,26 +84,85 @@ def generate_html(
 		]
 		body_parts.append(_entry_card(
 			entry_id="render_settings",
-			kind="render",
-			title="~ Render Settings",
-			rows=rows,
+			kind="render", title="~ Render Settings", rows=rows,
 		))
+
+	# World
+	if world_changes:
+		body_parts.append(_section_header("World", "world", len(world_changes)))
+		rows = [
+			_change_row(c["property_path"], c["old_value"], c["new_value"])
+			for c in world_changes
+		]
+		body_parts.append(_entry_card(
+			entry_id="world_settings",
+			kind="world", title="~ World", rows=rows,
+		))
+
+	# Parent relationships
+	if parent_diffs:
+		body_parts.append(_section_header("Parent Relationships", "parent", len(parent_diffs)))
+		for pd in parent_diffs:
+			rows = [
+				_change_row(c["property_path"], c["old_value"], c["new_value"])
+				for c in pd.get("changes", [])
+			]
+			body_parts.append(_entry_card(
+				entry_id=_safe_id(f"parent_{pd['object_name']}"),
+				kind="parent", title=f"~ {pd['object_name']}", rows=rows,
+			))
+
+	# Constraints
+	if constraint_diffs:
+		body_parts.append(_section_header("Constraints", "constraint", len(constraint_diffs)))
+		for cd in constraint_diffs:
+			rows = [
+				_change_row(c["property_path"], c["old_value"], c["new_value"])
+				for c in cd.get("changes", [])
+			]
+			body_parts.append(_entry_card(
+				entry_id=_safe_id(f"constraint_{cd['object_name']}"),
+				kind="constraint", title=f"~ {cd['object_name']}", rows=rows,
+			))
+
+	# Custom properties
+	if custom_prop_diffs:
+		body_parts.append(_section_header("Custom Properties", "customprop", len(custom_prop_diffs)))
+		for cpd in custom_prop_diffs:
+			rows = [
+				_change_row(c["property_path"], c["old_value"], c["new_value"])
+				for c in cpd.get("changes", [])
+			]
+			body_parts.append(_entry_card(
+				entry_id=_safe_id(f"customprop_{cpd['object_name']}"),
+				kind="customprop", title=f"~ {cpd['object_name']}", rows=rows,
+			))
+
+	# F-curves
+	if fcurve_diffs:
+		body_parts.append(_section_header("F-Curves", "fcurve", len(fcurve_diffs)))
+		for fd in fcurve_diffs:
+			rows = [
+				_change_row(c["property_path"], c["old_value"], c["new_value"])
+				for c in fd.get("changes", [])
+			]
+			body_parts.append(_entry_card(
+				entry_id=_safe_id(f"fcurve_{fd['object_name']}"),
+				kind="fcurve", title=f"~ {fd['object_name']}", rows=rows,
+			))
 
 	if not body_parts:
 		body_parts.append(
 			'<div class="no-changes">No changes detected between snapshots.</div>'
 		)
 
-	body_html = "\n".join(body_parts)
-
 	return _wrap_document(
-		body_html=body_html,
+		body_html="\n".join(body_parts),
 		summary=summary,
 		snapshot_label=_esc(snapshot_label),
 		blend_filename=_esc(blend_filename),
 		exported_at=_esc(exported_at),
 	)
-
 
 def export_to_file(
 	result: dict,
@@ -118,25 +170,7 @@ def export_to_file(
 	blend_filepath: str,
 	output_path: str,
 ) -> str:
-	"""
-	Write the HTML report to a file.
 
-	Parameters
-	----------
-	result:
-		Diff result dict.
-	snapshot_label:
-		Label of the snapshot.
-	blend_filepath:
-		Full path to the .blend file (used for display only).
-	output_path:
-		Full path where the .html file should be written.
-
-	Returns
-	-------
-	str
-		The output_path that was written.
-	"""
 	blend_filename = os.path.basename(blend_filepath)
 	html = generate_html(
 		result=result,
@@ -319,6 +353,11 @@ def _wrap_document(
   .section-header.modified    {{ color: #ffb300; }}
   .section-header.collections {{ color: #42a5f5; }}
   .section-header.render      {{ color: #ce93d8; }}
+  .section-header.world       {{ color: #80deea; }}
+  .section-header.parent      {{ color: #ffcc80; }}
+  .section-header.constraint  {{ color: #ef9a9a; }}
+  .section-header.customprop  {{ color: #b39ddb; }}
+  .section-header.fcurve      {{ color: #80cbc4; }}
 
   /* ── Cards ── */
   .card {{
@@ -333,6 +372,11 @@ def _wrap_document(
   .card.modified    {{ border-left-color: #ffb300; }}
   .card.collections {{ border-left-color: #42a5f5; }}
   .card.render      {{ border-left-color: #ce93d8; }}
+  .card.world       {{ border-left-color: #80deea; }}
+  .card.parent      {{ border-left-color: #ffcc80; }}
+  .card.constraint  {{ border-left-color: #ef9a9a; }}
+  .card.customprop  {{ border-left-color: #b39ddb; }}
+  .card.fcurve      {{ border-left-color: #80cbc4; }}
 
   .card-title {{
 	font-weight: 600;

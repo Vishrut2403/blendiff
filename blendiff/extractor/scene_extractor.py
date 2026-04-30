@@ -82,6 +82,11 @@ class SceneExtractor:
 			log.warning("Failed to extract modifiers for %r: %s", obj.name, exc)
 
 		try:
+			data["parent"] = extract_parent_info(obj)
+		except Exception as exc:
+			log.warning("Failed to extract parent info for %r: %s", obj.name, exc)
+
+		try:
 			data["constraint_stack"] = extract_constraint_stack(obj)
 		except Exception as exc:
 			log.warning("Failed to extract constraints for %r: %s", obj.name, exc)
