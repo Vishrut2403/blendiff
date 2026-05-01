@@ -277,13 +277,7 @@ class BLENDIFF_PT_Results(bpy.types.Panel):
 # Value formatting helper  (fixes the material slot dict display bug)
 
 def _format_value(value) -> str:
-	"""
-	Convert a diff value to a readable string for the panel.
-
-	Handles the material slot display bug:
-	  Before: {'index': 0, 'name': 'Material.001', 'use_nodes': True}
-	  After:  Material.001
-	"""
+	
 	if isinstance(value, dict):
 		# Material slot dict
 		if "name" in value and "index" in value:

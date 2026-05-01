@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.5.0 — 2026-04-30
+
+### Added
+- Parent/child relationship diffing — parent name, parent type, parent bone
+- Constraint stack diffing — 25+ constraint types with per-param comparison
+- Custom property diffing — added/removed/changed `obj[key]` properties with float tolerance
+- F-curve diffing — per-channel keyframe count, frame range, interpolation, extrapolation
+- All new diff types fully wired end-to-end: extract → serialize → snapshot → diff → UI panel → HTML report
+- `SceneDiff` now includes `parent_diffs`, `constraint_diffs`, `custom_prop_diffs`, `fcurve_diffs`
+- `summary()` now includes counts for all new diff types
+- Serializer updated to pass through parent, constraint, custom prop, and F-curve data
+- 99 new tests (28 parent, 43 constraint, 28 custom props, 35 F-curves), total now 602+
+
+### Fixed
+- `SceneSerializer._serialize_object` was silently dropping parent, constraint, custom prop, and F-curve fields
+- F-curve extraction compatible with both Blender 4.x (`action.fcurves`) and Blender 5.x layered action API
+
 ## 0.4.0 — 2026-04-29
 
 ### Added
