@@ -12,6 +12,14 @@ BlenDiff compares two `.blend` file states using Blender's Python API — not bi
 - **Object & collection diffing** — detects added, removed, and modified objects with per-property change tracking (transform, visibility, collection membership)
 - **Material node graph diffing** — per-node, per-socket comparison including image names, input values, and rewired links
 - **Render settings diffing** — engine, resolution, sampling, output format, color management, Cycles and EEVEE sub-settings
+- **Camera & light diffing** — focal length, clip planes, DOF, sensor, light type, energy, shadow, spot/area/sun settings
+- **Mesh summary diffing** — vertex/edge/face counts, bounding box, UV layers, shape keys, vertex groups
+- **World/environment diffing** — background color, strength, HDRI filepath, ambient occlusion
+- **Modifier stack diffing** — ordered comparison of 15+ modifier types with per-param change detection
+- **Parent/child relationship diffing** — parent name, parent type, parent bone (critical for rigs)
+- **Constraint stack diffing** — 25+ constraint types with per-param comparison (IK, Copy Location/Rotation/Scale, Track To, Child Of, and more)
+- **Custom property diffing** — detects added, removed, and changed `obj[key]` properties with float tolerance
+- **F-curve diffing** — per-channel keyframe count, frame range, interpolation, and extrapolation
 - **Three-way merge** — conflict detection and per-property resolution (Use A / Use B / Use Base) with a Blender UI
 - **Annotated HTML export** — self-contained dark-themed report with per-entry annotation textareas and JSON round-trip
 - **Headless CLI** — run diffs in CI without launching Blender
@@ -28,7 +36,7 @@ pip install blendiff
 
 ### As a Blender addon
 
-Download the latest `blendiff.zip` from [Releases](https://github.com/Vishrut2403/blendiff/releases) and install via **Edit → Preferences → Add-ons → Install**.
+Download the latest `blendiff-0.5.0.zip` from [Releases](https://github.com/Vishrut2403/blendiff/releases) and install via **Edit → Preferences → Add-ons → Install**.
 
 ---
 
@@ -70,15 +78,30 @@ for diff in result.object_diffs:
     print(diff.name, diff.kind)
     for change in diff.changes:
         print(" ", change.property_path, change.old_value, "→", change.new_value)
+
+# Parent relationship diffs
+for diff in result.parent_diffs:
+    print(diff.summary())
+
+# Constraint diffs
+for diff in result.constraint_diffs:
+    print(diff.summary())
+
+# Custom property diffs
+for diff in result.custom_prop_diffs:
+    print(diff.summary())
+
+# F-curve diffs
+for diff in result.fcurve_diffs:
+    print(diff.summary())
 ```
 
 ---
 
 ## Architecture
 
-```
 blendiff/
-├── data_model/      # Dataclasses — SceneDiff, RenderDiff, MergeProposal, …
+├── data_model/      # Dataclasses — SceneDiff, RenderDiff, ParentDiff, ConstraintDiff, …
 ├── diff_engine/     # Pure comparison logic — no bpy
 ├── serializer/      # mathutils → JSON-safe types
 ├── storage/         # .blendiff sidecar CRUD
@@ -99,7 +122,7 @@ pip install blendiff[dev]
 pytest tests/ -v
 ```
 
-224+ tests, all passing without a Blender installation.
+600+ tests, all passing without a Blender installation.
 
 ---
 
