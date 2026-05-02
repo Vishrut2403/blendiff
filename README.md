@@ -100,6 +100,7 @@ for diff in result.fcurve_diffs:
 
 ## Architecture
 
+```
 blendiff/
 ├── data_model/      # Dataclasses — SceneDiff, RenderDiff, ParentDiff, ConstraintDiff, …
 ├── diff_engine/     # Pure comparison logic — no bpy

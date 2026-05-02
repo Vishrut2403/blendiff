@@ -13,6 +13,7 @@ from .material_extractor import MaterialExtractor
 from .constraint_extractor import extract_constraint_stack
 from .custom_prop_extractor import extract_custom_props
 from .fcurve_extractor import extract_fcurves
+from .driver_extractor import extract_drivers
 
 log = logging.getLogger(__name__)
 
@@ -73,6 +74,7 @@ class SceneExtractor:
 			"constraint_stack":[],
 			"custom_props":    {},
 			"fcurves":         [],
+			"drivers":         [],
 		}
 
 		# Modifiers exist on all object types
@@ -100,6 +102,11 @@ class SceneExtractor:
 			data["fcurves"] = extract_fcurves(obj)
 		except Exception as exc:
 			log.warning("Failed to extract F-curves for %r: %s", obj.name, exc)
+
+		try:
+			data["drivers"] = extract_drivers(obj)
+		except Exception as exc:
+			log.warning("Failed to extract drivers for %r: %s", obj.name, exc)
 
 		if obj_type == "CAMERA":
 			try:

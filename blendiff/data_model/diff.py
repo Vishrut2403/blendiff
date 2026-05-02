@@ -90,6 +90,7 @@ class SceneDiff:
 	constraint_diffs: list = field(default_factory=list)
 	custom_prop_diffs: list = field(default_factory=list)
 	fcurve_diffs: list = field(default_factory=list)
+	driver_diffs: list = field(default_factory=list)       # list[DriverDiff]
 
 	@property
 	def added_objects(self) -> list[ObjectDiff]:
@@ -114,6 +115,7 @@ class SceneDiff:
 			or self.constraint_diffs
 			or self.custom_prop_diffs
 			or self.fcurve_diffs
+			or self.driver_diffs
 		)
 
 	def summary(self) -> dict[str, int]:
@@ -128,4 +130,5 @@ class SceneDiff:
 			"constraint_changes":  len(self.constraint_diffs),
 			"custom_prop_changes": len(self.custom_prop_diffs),
 			"fcurve_changes":      len(self.fcurve_diffs),
+			"driver_changes":      len(self.driver_diffs),
 		}

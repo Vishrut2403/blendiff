@@ -26,6 +26,7 @@ def generate_html(
 	constraint_diffs   = result.get("constraint_diffs", [])
 	custom_prop_diffs  = result.get("custom_prop_diffs", [])
 	fcurve_diffs       = result.get("fcurve_diffs", [])
+	driver_diffs 	= result.get("driver_diffs", [])
 
 	body_parts: list[str] = []
 
@@ -149,6 +150,19 @@ def generate_html(
 			body_parts.append(_entry_card(
 				entry_id=_safe_id(f"fcurve_{fd['object_name']}"),
 				kind="fcurve", title=f"~ {fd['object_name']}", rows=rows,
+			))
+
+	# Drivers
+	if driver_diffs:
+		body_parts.append(_section_header("Drivers", "driver", len(driver_diffs)))
+		for dd in driver_diffs:
+			rows = [
+				_change_row(c["property_path"], c["old_value"], c["new_value"])
+				for c in dd.get("changes", [])
+			]
+			body_parts.append(_entry_card(
+				entry_id=_safe_id(f"driver_{dd['object_name']}"),
+				kind="driver", title=f"~ {dd['object_name']}", rows=rows,
 			))
 
 	if not body_parts:
@@ -358,6 +372,7 @@ def _wrap_document(
   .section-header.constraint  {{ color: #ef9a9a; }}
   .section-header.customprop  {{ color: #b39ddb; }}
   .section-header.fcurve      {{ color: #80cbc4; }}
+  .section-header.driver      {{ color: #ffe082; }}
 
   /* ── Cards ── */
   .card {{
@@ -377,6 +392,7 @@ def _wrap_document(
   .card.constraint  {{ border-left-color: #ef9a9a; }}
   .card.customprop  {{ border-left-color: #b39ddb; }}
   .card.fcurve      {{ border-left-color: #80cbc4; }}
+  .card.driver      {{ border-left-color: #ffe082; }}
 
   .card-title {{
 	font-weight: 600;

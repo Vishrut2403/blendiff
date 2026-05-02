@@ -47,6 +47,7 @@ class SceneSerializer:
 			"constraint_stack": obj.get("constraint_stack", []),
 			"custom_props":     obj.get("custom_props", {}),
 			"fcurves":          obj.get("fcurves", []),
+			"drivers":          obj.get("drivers", []),
 		}
 
 	def _serialize_transform(self, t: dict) -> dict:

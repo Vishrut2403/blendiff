@@ -46,6 +46,7 @@ def _run_diff_against_dict(context, snapshot_dict: dict) -> dict:
 			f"Modified: {s['modified']}  Collections: {s['collection_changes']}  "
 			f"Parents: {s['parent_changes']}  Constraints: {s['constraint_changes']}  "
 			f"Custom Props: {s['custom_prop_changes']}  F-Curves: {s['fcurve_changes']}"
+			f"  Drivers: {s['driver_changes']}  "
 		),
 		"added_objects": [o.name for o in diff.added_objects],
 		"removed_objects": [o.name for o in diff.removed_objects],
@@ -149,6 +150,20 @@ def _run_diff_against_dict(context, snapshot_dict: dict) -> dict:
 				],
 			}
 			for fd in diff.fcurve_diffs
+		],
+		"driver_diffs": [
+			{
+				"object_name": dd.object_name,
+				"changes": [
+					{
+						"property_path": c.property_path,
+						"old_value": c.old_value,
+						"new_value": c.new_value,
+					}
+					for c in dd.changes
+				],
+			}
+			for dd in diff.driver_diffs
 		],
 	}
 

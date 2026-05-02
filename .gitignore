@@ -32,3 +32,6 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+
+# Zip files
+*.zip
