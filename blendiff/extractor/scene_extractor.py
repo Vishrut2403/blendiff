@@ -14,6 +14,7 @@ from .constraint_extractor import extract_constraint_stack
 from .custom_prop_extractor import extract_custom_props
 from .fcurve_extractor import extract_fcurves
 from .driver_extractor import extract_drivers
+from .nla_extractor import extract_nla_tracks
 
 log = logging.getLogger(__name__)
 
@@ -75,6 +76,7 @@ class SceneExtractor:
 			"custom_props":    {},
 			"fcurves":         [],
 			"drivers":         [],
+			"nla_tracks":      [],
 		}
 
 		# Modifiers exist on all object types
@@ -107,6 +109,11 @@ class SceneExtractor:
 			data["drivers"] = extract_drivers(obj)
 		except Exception as exc:
 			log.warning("Failed to extract drivers for %r: %s", obj.name, exc)
+			
+		try:
+			data["nla_tracks"] = extract_nla_tracks(obj)
+		except Exception as exc:	
+			log.warning("Failed to extract NLA tracks for %r: %s", obj.name, exc)
 
 		if obj_type == "CAMERA":
 			try:

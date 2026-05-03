@@ -48,6 +48,7 @@ class SceneSerializer:
 			"custom_props":     obj.get("custom_props", {}),
 			"fcurves":          obj.get("fcurves", []),
 			"drivers":          obj.get("drivers", []),
+			"nla_tracks":       obj.get("nla_tracks", []),
 		}
 
 	def _serialize_transform(self, t: dict) -> dict:

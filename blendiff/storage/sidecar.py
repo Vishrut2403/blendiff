@@ -15,19 +15,7 @@ SIDECAR_EXTENSION = ".blendiff"
 # Git helper
 
 def _get_git_hash(cwd: Optional[str] = None) -> Optional[str]:
-	"""
-	Return the short SHA of the current HEAD commit, or None if:
-	- git is not installed
-	- the working directory is not inside a git repo
-	- any other error occurs
 
-	Never raises — always degrades gracefully.
-
-	Parameters
-	----------
-	cwd : str | None
-		Directory to run git in. Defaults to the process working directory.
-	"""
 	try:
 		result = subprocess.run(
 			["git", "rev-parse", "--short", "HEAD"],
@@ -49,10 +37,10 @@ def _get_git_hash(cwd: Optional[str] = None) -> Optional[str]:
 class Snapshot:
 		id: str
 		label: str
-		timestamp: str          # ISO-8601, UTC
+		timestamp: str
 		scene_name: str
-		data: dict              # SerializedScene as a plain dict
-		git_hash: Optional[str] = None  # short SHA at snapshot time, or None
+		data: dict
+		git_hash: Optional[str] = None
 
 		@staticmethod
 		def create(
@@ -82,24 +70,20 @@ class Snapshot:
 						timestamp=d["timestamp"],
 						scene_name=d["scene_name"],
 						data=d["data"],
-						git_hash=d.get("git_hash"),  # None for old snapshots without hash
+						git_hash=d.get("git_hash"),
 				)
 
 		def timestamp_display(self) -> str:
-				"""Human-readable local timestamp for UI display."""
 				try:
 						dt = datetime.fromisoformat(self.timestamp)
-						# Convert UTC → local for display
+
 						local_dt = dt.astimezone()
 						return local_dt.strftime("%Y-%m-%d %H:%M:%S")
 				except Exception:
 						return self.timestamp
 
 		def label_display(self) -> str:
-				"""
-				Label with git hash suffix when available.
-				e.g. "Before rigging [a3f2c1b]"
-				"""
+
 				if self.git_hash:
 						return f"{self.label} [{self.git_hash}]"
 				return self.label
@@ -118,44 +102,24 @@ def _empty_sidecar(blend_filename: str) -> dict:
 # SidecarManager
 
 class SidecarManager:
-		"""
-		Reads and writes the .blendiff sidecar file.
-
-		Usage:
-				mgr = SidecarManager("/path/to/my_scene.blend")
-				mgr.save_snapshot("Before rigging", "Scene", serialized_scene_dict)
-				snapshots = mgr.list_snapshots()
-				snap = mgr.get_snapshot(some_uuid)
-				mgr.delete_snapshot(some_uuid)
-		"""
 
 		def __init__(self, blend_filepath: str):
-				"""
-				Parameters
-				----------
-				blend_filepath : str
-						Absolute path to the .blend file, as returned by bpy.data.filepath.
-						May be empty string if the file has never been saved.
-				"""
-				self._blend_filepath = blend_filepath
-				self._sidecar_path = self._resolve_sidecar_path(blend_filepath)
+
+			self._blend_filepath = blend_filepath
+			self._sidecar_path = self._resolve_sidecar_path(blend_filepath)
 
 
 		# Public API
 
-
 		@property
 		def sidecar_path(self) -> Optional[str]:
-				"""Absolute path to the sidecar file, or None if blend is unsaved."""
 				return self._sidecar_path
 
 		@property
 		def is_available(self) -> bool:
-				"""False when the blend file has not been saved yet (no filepath)."""
 				return self._sidecar_path is not None
 
 		def list_snapshots(self) -> list[Snapshot]:
-				"""Return all snapshots, newest first."""
 				data = self._load_raw()
 				snapshots = [Snapshot.from_dict(s) for s in data.get("snapshots", [])]
 				# Newest first — reverse chronological
@@ -176,17 +140,9 @@ class SidecarManager:
 				scene_name: str,
 				serialized_scene: dict,
 		) -> Snapshot:
-				"""
-				Create a new snapshot and append it to the sidecar.
-				Automatically attaches the current git commit hash when available.
 
-				Returns the created Snapshot.
-				Raises RuntimeError if blend file is unsaved.
-				"""
 				self._require_available()
 
-				# Use the blend file's directory as the git working dir so the
-				# hash reflects the repo the asset lives in, not the CWD.
 				blend_dir = os.path.dirname(self._blend_filepath) or None
 				git_hash = _get_git_hash(cwd=blend_dir) or _get_git_hash(cwd=None)
 
@@ -225,11 +181,7 @@ class SidecarManager:
 				return True
 
 		def rename_snapshot(self, snapshot_id: str, new_label: str) -> bool:
-				"""
-				Update the label of an existing snapshot.
 
-				Returns True if renamed, False if not found.
-				"""
 				self._require_available()
 
 				data = self._load_raw()
@@ -241,7 +193,6 @@ class SidecarManager:
 				return False
 
 		def snapshot_count(self) -> int:
-				"""Number of snapshots currently stored."""
 				data = self._load_raw()
 				return len(data.get("snapshots", []))
 
@@ -251,20 +202,14 @@ class SidecarManager:
 
 		@staticmethod
 		def _resolve_sidecar_path(blend_filepath: str) -> Optional[str]:
-				"""
-				Derive the sidecar path from the blend filepath.
-				Returns None if blend_filepath is empty (unsaved file).
-				"""
+
 				if not blend_filepath:
 						return None
 				base, _ = os.path.splitext(blend_filepath)
 				return base + SIDECAR_EXTENSION
 
 		def _load_raw(self) -> dict:
-				"""
-				Load the sidecar JSON from disk.
-				Returns an empty sidecar structure if the file doesn't exist yet.
-				"""
+
 				if not os.path.exists(self._sidecar_path):
 						blend_filename = os.path.basename(self._blend_filepath)
 						return _empty_sidecar(blend_filename)
@@ -273,7 +218,6 @@ class SidecarManager:
 						with open(self._sidecar_path, "r", encoding="utf-8") as f:
 								return json.load(f)
 				except (json.JSONDecodeError, OSError) as e:
-						# Corrupted sidecar — return empty rather than crashing Blender
 						print(f"[BlenDiff] Warning: could not read sidecar: {e}")
 						blend_filename = os.path.basename(self._blend_filepath)
 						return _empty_sidecar(blend_filename)

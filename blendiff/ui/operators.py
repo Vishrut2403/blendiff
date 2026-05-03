@@ -13,10 +13,7 @@ from ..merge_engine.merge_engine import MergeEngine
 # Helpers
 
 def _extract_current_scene(context) -> tuple[dict, str]:
-	"""
-	Extract + serialise the current scene.
-	Returns (serialized_dict, scene_name).
-	"""
+
 	extractor = SceneExtractor()
 	serializer = SceneSerializer()
 	raw = extractor.extract(context)
@@ -29,25 +26,32 @@ def _get_sidecar(context) -> SidecarManager:
 
 
 def _run_diff_against_dict(context, snapshot_dict: dict) -> dict:
-	"""
-	Diff snapshot_dict against the current scene.
-	Stores result JSON on wm["blendiff_result"].
-	Returns the result dict.
-	"""
+
 	current_dict, _ = _extract_current_scene(context)
 
 	engine = DiffEngine()
 	diff = engine.compare(snapshot_dict, current_dict)
 
 	s = diff.summary()
+
+	_parts = "  ".join(
+		part for part in [
+			f"Added: {s['added']}"                    if s['added']                else "",
+			f"Removed: {s['removed']}"                if s['removed']              else "",
+			f"Modified: {s['modified']}"              if s['modified']             else "",
+			f"Collections: {s['collection_changes']}" if s['collection_changes']   else "",
+			f"Parents: {s['parent_changes']}"         if s['parent_changes']       else "",
+			f"Constraints: {s['constraint_changes']}" if s['constraint_changes']   else "",
+			f"Custom Props: {s['custom_prop_changes']}" if s['custom_prop_changes'] else "",
+			f"F-Curves: {s['fcurve_changes']}"        if s['fcurve_changes']       else "",
+			f"Drivers: {s['driver_changes']}"         if s['driver_changes']       else "",
+			f"NLA: {s['nla_changes']}"                if s['nla_changes']          else "",
+		]
+		if part
+	)
+
 	result = {
-		"summary": (
-			f"Added: {s['added']}  Removed: {s['removed']}  "
-			f"Modified: {s['modified']}  Collections: {s['collection_changes']}  "
-			f"Parents: {s['parent_changes']}  Constraints: {s['constraint_changes']}  "
-			f"Custom Props: {s['custom_prop_changes']}  F-Curves: {s['fcurve_changes']}"
-			f"  Drivers: {s['driver_changes']}  "
-		),
+		"summary": _parts if _parts else "No changes detected",
 		"added_objects": [o.name for o in diff.added_objects],
 		"removed_objects": [o.name for o in diff.removed_objects],
 		"modified_objects": [
@@ -165,6 +169,20 @@ def _run_diff_against_dict(context, snapshot_dict: dict) -> dict:
 			}
 			for dd in diff.driver_diffs
 		],
+		"nla_diffs": [
+			{
+				"object_name": nd.object_name,
+				"changes": [
+					{
+						"property_path": c.property_path,
+						"old_value": c.old_value,
+						"new_value": c.new_value,
+					}
+					for c in nd.changes
+				],
+			}
+			for nd in diff.nla_diffs
+		],
 	}
 
 	context.window_manager["blendiff_result"] = json.dumps(result)
@@ -242,7 +260,6 @@ class BLENDIFF_OT_SaveSnapshot(bpy.types.Operator):
 	)
 
 	def invoke(self, context, event):
-		# Pre-fill with a sensible default
 		self.label = f"Snapshot {_get_sidecar(context).snapshot_count() + 1}"
 		return context.window_manager.invoke_props_dialog(self)
 
@@ -292,7 +309,6 @@ class BLENDIFF_OT_DiffAgainstSnapshot(bpy.types.Operator):
 			return {"CANCELLED"}
 
 		try:
-			# Store the source label so the panel can show which snapshot is active
 			context.window_manager["blendiff_active_snapshot_label"] = snap.label
 			context.window_manager["blendiff_active_snapshot_id"] = snap.id
 
@@ -324,7 +340,6 @@ class BLENDIFF_OT_DeleteSnapshot(bpy.types.Operator):
 		deleted = mgr.delete_snapshot(self.snapshot_id)
 
 		if deleted:
-			# Clear active snapshot if it was the one deleted
 			wm = context.window_manager
 			if wm.get("blendiff_active_snapshot_id") == self.snapshot_id:
 				for key in ("blendiff_active_snapshot_id", "blendiff_active_snapshot_label",
@@ -336,7 +351,8 @@ class BLENDIFF_OT_DeleteSnapshot(bpy.types.Operator):
 			self.report({"WARNING"}, "BlenDiff: Snapshot not found.")
 
 		return {"FINISHED"}
-	
+
+
 class BLENDIFF_OT_ExportHTML(bpy.types.Operator):
 	"""Export the current diff result as a self-contained HTML report"""
 	bl_idname = "blendiff.export_html"
@@ -355,39 +371,40 @@ class BLENDIFF_OT_ExportHTML(bpy.types.Operator):
 			return {"CANCELLED"}
 
 		try:
-				from ..export.html_exporter import export_to_file, build_output_path
+			from ..export.html_exporter import export_to_file, build_output_path
 
-				result = json.loads(wm["blendiff_result"])
-				snapshot_label = wm.get("blendiff_active_snapshot_label", "Snapshot")
+			result = json.loads(wm["blendiff_result"])
+			snapshot_label = wm.get("blendiff_active_snapshot_label", "Snapshot")
 
-				output_path = build_output_path(bpy.data.filepath, snapshot_label)
-				export_to_file(
-						result=result,
-						snapshot_label=snapshot_label,
-						blend_filepath=bpy.data.filepath,
-						output_path=output_path,
-				)
+			output_path = build_output_path(bpy.data.filepath, snapshot_label)
+			export_to_file(
+				result=result,
+				snapshot_label=snapshot_label,
+				blend_filepath=bpy.data.filepath,
+				output_path=output_path,
+			)
 
-				self.report({"INFO"}, f"BlenDiff: Exported to {output_path}")
-				return {"FINISHED"}
+			self.report({"INFO"}, f"BlenDiff: Exported to {output_path}")
+			return {"FINISHED"}
 
 		except Exception as e:
-				self.report({"ERROR"}, f"BlenDiff: {e}")
-				return {"CANCELLED"}
-		
+			self.report({"ERROR"}, f"BlenDiff: {e}")
+			return {"CANCELLED"}
+
+
 class BLENDIFF_OT_RunThreeWayDiff(bpy.types.Operator):
 	"""Run a three-way diff between base, version A and version B snapshots"""
 	bl_idname = "blendiff.run_threeway_diff"
 	bl_label = "Run Three-Way Diff"
 	bl_description = "Compare base vs version A vs version B to find conflicts"
- 
+
 	def execute(self, context):
 		wm = context.window_manager
- 
+
 		if not bpy.data.filepath:
 			self.report({"ERROR"}, "BlenDiff: Save your .blend file first.")
 			return {"CANCELLED"}
- 
+
 		base_label = wm.blendiff_base_label.strip()
 		a_label    = wm.blendiff_a_label.strip()
 		b_label    = wm.blendiff_b_label.strip()
@@ -413,7 +430,7 @@ class BLENDIFF_OT_RunThreeWayDiff(bpy.types.Operator):
 		if missing:
 			self.report({"ERROR"}, f"BlenDiff: Snapshots not found: {', '.join(missing)}")
 			return {"CANCELLED"}
- 
+
 		try:
 			engine = MergeEngine()
 			tw = engine.three_way_diff(
@@ -424,12 +441,11 @@ class BLENDIFF_OT_RunThreeWayDiff(bpy.types.Operator):
 				label_a=a_label,
 				label_b=b_label,
 			)
- 
-			# Serialise ThreeWayDiff to JSON for UI storage
+
 			result = _serialize_threeway(tw)
 			wm["blendiff_threeway_result"] = json.dumps(result)
-			wm["blendiff_threeway_obj"] = json.dumps(result)  # kept for applier
- 
+			wm["blendiff_threeway_obj"] = json.dumps(result)
+
 			s = tw.summary()
 			self.report({"INFO"},
 				f"BlenDiff: {s['total_conflicts']} conflict(s), "
@@ -440,36 +456,34 @@ class BLENDIFF_OT_RunThreeWayDiff(bpy.types.Operator):
 		except Exception as e:
 			self.report({"ERROR"}, f"BlenDiff: {e}")
 			return {"CANCELLED"}
- 
- 
+
+
 class BLENDIFF_OT_SetResolution(bpy.types.Operator):
 	"""Set the resolution for a specific conflict"""
 	bl_idname = "blendiff.set_resolution"
 	bl_label = "Set Resolution"
- 
+
 	object_name:   bpy.props.StringProperty()
 	property_path: bpy.props.StringProperty()
-	resolution:    bpy.props.StringProperty()  # 'use_a', 'use_b', 'use_base'
- 
+	resolution:    bpy.props.StringProperty()
+
 	def execute(self, context):
 		wm = context.window_manager
 		raw = wm.get("blendiff_threeway_result")
 		if not raw:
 			self.report({"ERROR"}, "BlenDiff: No three-way diff result found.")
 			return {"CANCELLED"}
- 
+
 		try:
 			result = json.loads(raw)
- 
-			# Find and update the conflict
+
 			for proposal in result.get("proposals", []):
 				if proposal["object_name"] == self.object_name:
 					for conflict in proposal.get("conflicts", []):
 						if conflict["property_path"] == self.property_path:
 							conflict["resolution"] = self.resolution
 							break
- 
-			# Recompute ready_to_apply
+
 			all_resolved = all(
 				all(
 					c.get("resolution", "unresolved") not in ("unresolved",)
@@ -484,51 +498,49 @@ class BLENDIFF_OT_SetResolution(bpy.types.Operator):
 				for p in result.get("proposals", [])
 			)
 			result["summary"]["unresolved"] = unresolved
- 
+
 			wm["blendiff_threeway_result"] = json.dumps(result)
 			return {"FINISHED"}
 		except Exception as e:
 			self.report({"ERROR"}, f"BlenDiff: {e}")
 			return {"CANCELLED"}
- 
- 
+
+
 class BLENDIFF_OT_ApplyMerge(bpy.types.Operator):
 	"""Apply all resolved merge decisions to the current scene"""
 	bl_idname = "blendiff.apply_merge"
 	bl_label = "Apply Merge"
 	bl_description = "Apply all resolved conflict decisions to the scene"
- 
+
 	def invoke(self, context, event):
 		return context.window_manager.invoke_confirm(self, event)
- 
+
 	def execute(self, context):
 		wm = context.window_manager
 		raw = wm.get("blendiff_threeway_result")
 		if not raw:
 			self.report({"ERROR"}, "BlenDiff: No three-way diff result.")
 			return {"CANCELLED"}
- 
+
 		result = json.loads(raw)
 		if not result.get("summary", {}).get("ready_to_apply", False):
 			self.report({"ERROR"}, "BlenDiff: Not all conflicts resolved yet.")
 			return {"CANCELLED"}
- 
+
 		try:
 			from ..merge_engine.applier import Applier
 			from ..data_model.conflict import (
 				ThreeWayDiff, MergeProposal, PropertyConflict,
 				NonConflictingChange, Resolution, ConflictKind,
 			)
- 
-			# Reconstruct ThreeWayDiff from stored JSON
+
 			tw = _deserialize_threeway(result)
 			applier = Applier()
 			apply_result = applier.apply_all(tw, context)
- 
-			# Clear the threeway result
+
 			if "blendiff_threeway_result" in wm:
 				del wm["blendiff_threeway_result"]
- 
+
 			self.report(
 				{"INFO"},
 				f"BlenDiff: Applied {apply_result.succeeded} proposal(s). "
@@ -538,10 +550,10 @@ class BLENDIFF_OT_ApplyMerge(bpy.types.Operator):
 		except Exception as e:
 			self.report({"ERROR"}, f"BlenDiff: {e}")
 			return {"CANCELLED"}
- 
 
-# Serialization helpers for ThreeWayDiff ↔ JSON (for wm storage)
- 
+
+# Serialization helpers for ThreeWayDiff ↔ JSON
+
 def _serialize_threeway(tw) -> dict:
 	"""Convert ThreeWayDiff to a plain JSON-safe dict."""
 	return {
@@ -582,15 +594,15 @@ def _serialize_threeway(tw) -> dict:
 			for p in tw.proposals
 		],
 	}
- 
- 
+
+
 def _deserialize_threeway(d: dict):
 	"""Reconstruct a ThreeWayDiff from a JSON dict."""
 	from ..data_model.conflict import (
 		ThreeWayDiff, MergeProposal, PropertyConflict,
 		NonConflictingChange, Resolution, ConflictKind,
 	)
- 
+
 	proposals = []
 	for pd in d.get("proposals", []):
 		conflicts = [
@@ -619,7 +631,7 @@ def _deserialize_threeway(d: dict):
 			non_conflicting_from_b=nc_b,
 			structural_conflict=pd.get("structural_conflict", False),
 		))
- 
+
 	tw = ThreeWayDiff(
 		base_label=d["base_label"],
 		label_a=d["label_a"],

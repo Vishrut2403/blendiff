@@ -287,6 +287,21 @@ class BLENDIFF_PT_Results(bpy.types.Panel):
 					sub.label(
 						text=f"        {_format_value(change['old_value'])}  →  {_format_value(change['new_value'])}"
 				)
+					
+		# NLA Diffs
+		nla_diffs = diff.get("nla_diffs", [])
+		if nla_diffs:
+			box = layout.box()
+			box.label(text=f"NLA Tracks ({len(nla_diffs)})", icon="NLA")
+			for nd in nla_diffs:
+				box.label(text=f"  ~ {nd['object_name']}")
+				for change in nd.get("changes", []):
+					sub = box.column()
+					sub.scale_y = 0.8
+					sub.label(text=f"      {change['property_path']}")
+					sub.label(
+						text=f"        {_format_value(change['old_value'])}  →  {_format_value(change['new_value'])}"
+				)
 
 # Value formatting helper  (fixes the material slot dict display bug)
 

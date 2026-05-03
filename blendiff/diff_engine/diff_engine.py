@@ -12,6 +12,7 @@ from blendiff.diff_engine.constraint_diff import diff_all_constraints
 from blendiff.diff_engine.custom_prop_diff import diff_all_custom_props
 from blendiff.diff_engine.fcurve_diff import diff_all_fcurves
 from blendiff.diff_engine.driver_diff import diff_all_drivers
+from blendiff.diff_engine.nla_diff import diff_all_nla
 
 from ..data_model.diff import (
 		ChangeKind,
@@ -70,6 +71,10 @@ class DiffEngine:
 						scene_b.get("objects", {}),
 				)
 				diff.driver_diffs = diff_all_drivers(
+						scene_a.get("objects", {}),
+						scene_b.get("objects", {}),
+				)
+				diff.nla_diffs = diff_all_nla(
 						scene_a.get("objects", {}),
 						scene_b.get("objects", {}),
 				)

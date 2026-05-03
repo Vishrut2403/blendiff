@@ -27,6 +27,7 @@ def generate_html(
 	custom_prop_diffs  = result.get("custom_prop_diffs", [])
 	fcurve_diffs       = result.get("fcurve_diffs", [])
 	driver_diffs 	= result.get("driver_diffs", [])
+	nla_diffs 		= result.get("nla_diffs", [])
 
 	body_parts: list[str] = []
 
@@ -163,6 +164,19 @@ def generate_html(
 			body_parts.append(_entry_card(
 				entry_id=_safe_id(f"driver_{dd['object_name']}"),
 				kind="driver", title=f"~ {dd['object_name']}", rows=rows,
+			))
+	
+	# NLA
+	if nla_diffs:
+		body_parts.append(_section_header("NLA Tracks & Strips", "nla", len(nla_diffs)))
+		for nd in nla_diffs:
+			rows = [
+				_change_row(c["property_path"], c["old_value"], c["new_value"])
+				for c in nd.get("changes", [])
+			]
+			body_parts.append(_entry_card(
+				entry_id=_safe_id(f"nla_{nd['object_name']}"),
+				kind="nla", title=f"~ {nd['object_name']}", rows=rows,
 			))
 
 	if not body_parts:
@@ -373,6 +387,7 @@ def _wrap_document(
   .section-header.customprop  {{ color: #b39ddb; }}
   .section-header.fcurve      {{ color: #80cbc4; }}
   .section-header.driver      {{ color: #ffe082; }}
+  .section-header.nla         {{ color: #80cbc4; }}
 
   /* ── Cards ── */
   .card {{
@@ -393,6 +408,7 @@ def _wrap_document(
   .card.customprop  {{ border-left-color: #b39ddb; }}
   .card.fcurve      {{ border-left-color: #80cbc4; }}
   .card.driver      {{ border-left-color: #ffe082; }}
+  .card.nla         {{ border-left-color: #80cbc4; }}
 
   .card-title {{
 	font-weight: 600;
