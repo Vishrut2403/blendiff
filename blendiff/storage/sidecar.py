@@ -11,14 +11,17 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from .migrate import migrate_scene, needs_migration
+from .object_store import collect_garbage, pack_scene, pool_stats, unpack_scene
 
 log = logging.getLogger(__name__)
 
-SIDECAR_VERSION = "0.2"
+SIDECAR_VERSION = "0.3"
 SIDECAR_EXTENSION = ".blendiff"
 
 # Sidecar files written by these versions are readable by the current loader.
-SUPPORTED_SIDECAR_VERSIONS = ("0.1", "0.2")
+# 0.3 introduced the shared object pool; earlier files store objects inline and
+# are packed automatically the next time the sidecar is written.
+SUPPORTED_SIDECAR_VERSIONS = ("0.1", "0.2", "0.3")
 
 
 # Git helper
@@ -83,16 +86,26 @@ class Snapshot:
 				return asdict(self)
 
 		@staticmethod
-		def from_dict(d: dict, migrate: bool = True) -> "Snapshot":
+		def from_dict(
+				d: dict,
+				pool: Optional[dict] = None,
+				migrate: bool = True,
+		) -> "Snapshot":
 				"""
 				Rebuild a Snapshot from its stored dict.
 
-				Scene data is migrated to the current schema on the way in, so
-				nothing downstream ever has to reason about historical snapshot
-				shapes. Migration is in-memory only; the file is untouched until
-				SidecarManager.migrate_file is called explicitly.
+				Objects are stored once in a shared pool and referenced by
+				digest, so they are rehydrated here: everything downstream sees
+				an ordinary full scene and never learns that deduplication
+				happened. Scene data is then migrated to the current schema, so
+				nothing downstream reasons about historical shapes either.
+
+				Both are in-memory only; the file is untouched until the next
+				write.
 				"""
 				data = d["data"]
+				if pool:
+						data = unpack_scene(data, pool)
 				if migrate:
 						data = migrate_scene(data)
 				return Snapshot(
@@ -158,7 +171,11 @@ class SidecarManager:
 
 		def list_snapshots(self) -> list[Snapshot]:
 				data = self._load_raw()
-				snapshots = [Snapshot.from_dict(s) for s in data.get("snapshots", [])]
+				pool = data.get("objects", {})
+				snapshots = [
+						Snapshot.from_dict(s, pool)
+						for s in data.get("snapshots", [])
+				]
 				# Newest first — reverse chronological
 				snapshots.sort(key=lambda s: s.timestamp, reverse=True)
 				return snapshots
@@ -166,9 +183,10 @@ class SidecarManager:
 		def get_snapshot(self, snapshot_id: str) -> Optional[Snapshot]:
 				"""Return a snapshot by UUID, or None if not found."""
 				data = self._load_raw()
+				pool = data.get("objects", {})
 				for s in data.get("snapshots", []):
 						if s["id"] == snapshot_id:
-								return Snapshot.from_dict(s)
+								return Snapshot.from_dict(s, pool)
 				return None
 
 		def save_snapshot(
@@ -234,6 +252,22 @@ class SidecarManager:
 		def snapshot_count(self) -> int:
 				data = self._load_raw()
 				return len(data.get("snapshots", []))
+
+		def storage_stats(self) -> dict:
+				"""
+				How much deduplication is saving on this sidecar.
+
+				``references`` is how many object slots the snapshots occupy in
+				total; ``stored`` is how many distinct objects are actually
+				written to disk.
+				"""
+				data = self._load_raw()
+				scenes = [s.get("data", {}) for s in data.get("snapshots", [])]
+				stats = pool_stats(data.get("objects", {}), scenes)
+				stats["snapshots"] = len(scenes)
+				if os.path.exists(self._sidecar_path or ""):
+						stats["bytes"] = os.path.getsize(self._sidecar_path)
+				return stats
 
 		def outdated_snapshot_ids(self) -> list[str]:
 				"""
@@ -311,6 +345,19 @@ class SidecarManager:
 				file via os.replace — which is atomic on POSIX and Windows.
 				"""
 				data["blendiff_version"] = SIDECAR_VERSION
+
+				# Deduplicate before writing. Doing it here rather than at each
+				# call site means every path — save, delete, rename, migrate —
+				# gets it, and a legacy sidecar with inline objects is packed
+				# the first time it is written.
+				pool = data.setdefault("objects", {})
+				snapshots = data.get("snapshots", [])
+				for snapshot in snapshots:
+						snapshot["data"] = pack_scene(snapshot.get("data", {}), pool)
+
+				# Reclaim objects no surviving snapshot references, or deleting
+				# a snapshot would free nothing and the pool would only grow.
+				collect_garbage(pool, [s.get("data", {}) for s in snapshots])
 
 				directory = os.path.dirname(os.path.abspath(self._sidecar_path))
 				os.makedirs(directory, exist_ok=True)

@@ -371,3 +371,179 @@ def _downgrade_stored_snapshots(blend_file):
 		snap["data"].pop("transform_space", None)
 	with open(sidecar_path, "w") as f:
 		json.dump(data, f)
+
+
+# Content-addressed storage
+
+class TestDeduplication:
+	"""
+	Snapshots share one object pool, so an object untouched across many
+	snapshots is written once rather than once per snapshot. Before this,
+	80 objects across 50 snapshots cost 24.6 MB and a 280 ms parse, paid every
+	time the snapshot list was drawn.
+	"""
+
+	def _scene(self, objects):
+		return {
+			"objects": objects,
+			"collections": {},
+			"scene_name": "Scene",
+			"schema_version": SCHEMA_VERSION,
+			"captured_domains": ["objects"],
+			"transform_space": "local",
+		}
+
+	def _obj(self, name, **extra):
+		data = {"name": name, "type": "MESH", "transform": {"location": [0, 0, 0]}}
+		data.update(extra)
+		return data
+
+	def _pool(self, blend_file):
+		with open(blend_file.replace(".blend", SIDECAR_EXTENSION)) as f:
+			return json.load(f).get("objects", {})
+
+	def test_repeated_snapshots_do_not_duplicate_objects(self, mgr, blend_file):
+		scene = self._scene({"Cube": self._obj("Cube")})
+		for i in range(10):
+			mgr.save_snapshot(f"snap{i}", "Scene", scene)
+
+		assert len(self._pool(blend_file)) == 1
+
+	def test_changed_object_adds_one_entry(self, mgr, blend_file):
+		mgr.save_snapshot("a", "Scene", self._scene({"Cube": self._obj("Cube")}))
+		mgr.save_snapshot("b", "Scene",
+		                  self._scene({"Cube": self._obj("Cube", moved=True)}))
+
+		assert len(self._pool(blend_file)) == 2
+
+	def test_round_trip_returns_full_objects(self, mgr):
+		scene = self._scene({"Cube": self._obj("Cube"), "Lamp": self._obj("Lamp")})
+		mgr.save_snapshot("a", "Scene", scene)
+
+		loaded = mgr.list_snapshots()[0]
+		assert loaded.data["objects"]["Cube"]["type"] == "MESH"
+		assert set(loaded.data["objects"]) == {"Cube", "Lamp"}
+
+	def test_get_snapshot_also_rehydrates(self, mgr):
+		snap = mgr.save_snapshot("a", "Scene",
+		                         self._scene({"Cube": self._obj("Cube")}))
+		fetched = mgr.get_snapshot(snap.id)
+		assert fetched.data["objects"]["Cube"]["name"] == "Cube"
+
+	def test_saved_snapshot_keeps_inline_data_for_the_caller(self, mgr):
+		"""Packing is a storage detail; the returned snapshot is a real scene."""
+		scene = self._scene({"Cube": self._obj("Cube")})
+		snap = mgr.save_snapshot("a", "Scene", scene)
+		assert snap.data["objects"]["Cube"]["type"] == "MESH"
+
+	def test_deleting_a_snapshot_reclaims_its_objects(self, mgr, blend_file):
+		mgr.save_snapshot("keep", "Scene", self._scene({"Cube": self._obj("Cube")}))
+		doomed = mgr.save_snapshot(
+			"drop", "Scene", self._scene({"Gone": self._obj("Gone")}))
+		assert len(self._pool(blend_file)) == 2
+
+		mgr.delete_snapshot(doomed.id)
+		assert len(self._pool(blend_file)) == 1
+
+	def test_shared_object_survives_deleting_one_snapshot(self, mgr):
+		scene = self._scene({"Cube": self._obj("Cube")})
+		first = mgr.save_snapshot("a", "Scene", scene)
+		mgr.save_snapshot("b", "Scene", scene)
+
+		mgr.delete_snapshot(first.id)
+		remaining = mgr.list_snapshots()[0]
+		assert remaining.data["objects"]["Cube"]["name"] == "Cube"
+
+	def test_deleting_everything_empties_the_pool(self, mgr, blend_file):
+		snap = mgr.save_snapshot("a", "Scene",
+		                         self._scene({"Cube": self._obj("Cube")}))
+		mgr.delete_snapshot(snap.id)
+		assert self._pool(blend_file) == {}
+
+	def test_legacy_inline_sidecar_is_packed_on_next_write(self, mgr, blend_file):
+		"""A pre-0.3 sidecar must open, and shrink the first time it is saved."""
+		path = blend_file.replace(".blend", SIDECAR_EXTENSION)
+		legacy = {
+			"blendiff_version": "0.2",
+			"blend_file": "scene.blend",
+			"snapshots": [{
+				"id": "old-1", "label": "legacy", "timestamp": "2020-01-01T00:00:00+00:00",
+				"scene_name": "Scene",
+				"data": self._scene({"Cube": self._obj("Cube")}),
+			}],
+		}
+		with open(path, "w") as f:
+			json.dump(legacy, f)
+
+		# Readable as-is.
+		assert mgr.list_snapshots()[0].data["objects"]["Cube"]["type"] == "MESH"
+
+		# And packed once anything is written.
+		mgr.save_snapshot("new", "Scene", self._scene({"Cube": self._obj("Cube")}))
+		assert len(self._pool(blend_file)) == 1
+
+	def test_storage_stats_report_savings(self, mgr):
+		scene = self._scene({"Cube": self._obj("Cube")})
+		for i in range(5):
+			mgr.save_snapshot(f"snap{i}", "Scene", scene)
+
+		stats = mgr.storage_stats()
+		assert stats["stored"] == 1
+		assert stats["references"] == 5
+		assert stats["saved"] == 4
+
+	def _heavy_obj(self, name):
+		"""
+		An object of realistic weight.
+
+		Deduplication replaces an object with a 32-character digest, so the
+		saving is proportional to how big the object was. Real objects carry
+		material node graphs and run to kilobytes; a three-field stub would
+		make the reference cost as much as the object and understate the
+		feature to the point of measuring nothing.
+		"""
+		return {
+			"name": name,
+			"type": "MESH",
+			"transform": {"location": [0, 0, 0], "rotation_euler": [0, 0, 0],
+			              "scale": [1, 1, 1], "rotation_mode": "XYZ"},
+			"material_slots": [{
+				"index": 0, "name": "Material", "use_nodes": True,
+				"node_graph": {"nodes": {
+					f"node{n}": {"type": "BSDF_PRINCIPLED",
+					             "inputs": {f"in{i}": 0.5 for i in range(8)}}
+					for n in range(12)
+				}},
+			}],
+			"mesh_data": {"vertex_count": 5000, "vertex_hash": "a" * 32},
+		}
+
+	def test_repeated_snapshots_grow_sublinearly(self, mgr, blend_file):
+		"""End to end: repeated snapshots must not multiply the file size."""
+		scene = self._scene({f"Obj{i}": self._heavy_obj(f"Obj{i}") for i in range(20)})
+		mgr.save_snapshot("first", "Scene", scene)
+		one = os.path.getsize(blend_file.replace(".blend", SIDECAR_EXTENSION))
+
+		for i in range(9):
+			mgr.save_snapshot(f"more{i}", "Scene", scene)
+		ten = os.path.getsize(blend_file.replace(".blend", SIDECAR_EXTENSION))
+
+		# Ten identical snapshots pay for one copy of the objects plus nine
+		# sets of references, nowhere near ten full copies.
+		assert ten < one * 2, f"expected sublinear growth, got {one} -> {ten}"
+
+	def test_edited_snapshot_costs_only_the_edit(self, mgr, blend_file):
+		"""Changing one object of twenty must not rewrite the other nineteen."""
+		objects = {f"Obj{i}": self._heavy_obj(f"Obj{i}") for i in range(20)}
+		mgr.save_snapshot("before", "Scene", self._scene(objects))
+		one = os.path.getsize(blend_file.replace(".blend", SIDECAR_EXTENSION))
+
+		edited = dict(objects)
+		edited["Obj0"] = {**self._heavy_obj("Obj0"), "moved": True}
+		mgr.save_snapshot("after", "Scene", self._scene(edited))
+		two = os.path.getsize(blend_file.replace(".blend", SIDECAR_EXTENSION))
+
+		# The second snapshot adds one object plus a reference map, so growth
+		# should be a small fraction of a full second copy.
+		growth = (two - one) / one
+		assert growth < 0.35, f"second snapshot grew the file by {growth:.0%}"
