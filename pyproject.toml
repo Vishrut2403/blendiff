@@ -2,9 +2,14 @@
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.version]
+path = "blendiff/__init__.py"
+
 [project]
 name = "blendiff"
-version = "0.5.0"
+# Read from blendiff/__init__.py — see [tool.hatch.version] below. Stating the
+# version in more than one file is what let three of them drift apart.
+dynamic = ["version"]
 description = "Semantic diff, snapshot history, and assisted merge for Blender .blend files"
 readme = "README.md"
 license = { text = "MIT" }
@@ -58,3 +63,6 @@ exclude = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "integration: runs inside a real Blender via tests/integration/run_in_blender.py",
+]

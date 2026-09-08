@@ -8,15 +8,24 @@
    `data_model/`. If you add a new property, you add it there first.
 4. **Extensibility by design.** Adding geometry-node diffing means:
    - adding an extractor method
-   - adding a schema entry
+   - adding a domain to `data_model/schema.py`
    - adding a diff comparator
+   - adding an applier entry, or leaving it explicitly unsupported
    No other files change.
 5. **Testable without Blender.** The extractor needs `bpy`; everything
-   downstream works on plain Python dicts and dataclasses.
+   downstream works on plain Python dicts and dataclasses. The extractor
+   itself is covered by integration tests that run inside real Blender.
 6. **MergeEngine never applies automatically.** Always propose, then
    confirm per-conflict. Applier only runs after full resolution.
 7. **Sidecar is always human-readable JSON.** Version-controllable
-   alongside the `.blend` file.
+   alongside the `.blend` file, and written atomically so a crash can
+   never leave a truncated history.
+8. **Never report a change you cannot substantiate.** A domain captured by
+   only one of two snapshots is reported as *not compared*, never diffed.
+   Transforms recorded in different spaces are not compared at all.
+9. **Never claim to apply what you did not.** The applier registry answers
+   `can_apply()` for every property path, results are counted per property,
+   and unappliable differences are surfaced as read-only.
 
 ---
 
@@ -179,3 +188,126 @@ Ver B ──► SceneSnapshot              │
 | **Total** | | **224** |
 
 All tests run without Blender (`python -m pytest tests/ -v`).
+
+---
+
+## Object Identity
+
+Diffing keyed on `obj.name` cannot survive a rename: "Cube" becoming
+"Body_LOW" reads as a deletion plus an unrelated addition, and every property
+change on that object is lost with it. Artists rename constantly, so this was
+the single largest correctness gap in the tool.
+
+`obj.session_uid` is unique but regenerated on file load, so it cannot link two
+snapshots. Instead each object is stamped with a UUID in a custom property,
+`_blendiff_id`. Custom properties are saved inside the `.blend`, so the id
+survives reload, rename, append and link.
+
+Rules that keep this honest:
+
+* **Stamping is opt-in per call.** Only snapshot capture stamps, because
+  stamping writes to the `.blend` and marks it modified. Running a diff is
+  read-only and never dirties the user's file.
+* **Linked and library-overridden objects are never stamped.** Their data
+  belongs to another file and cannot be saved.
+* **Ambiguous ids are discarded.** Duplicating an object with Shift+D copies
+  its custom properties, id included, so an id appearing on two objects is
+  useless for matching. Those objects fall back to name matching, which
+  handles duplication correctly: the original keeps its name and pairs up,
+  the copy is a genuine addition.
+* **The id is hidden from custom-property diffing**, since it is BlenDiff
+  bookkeeping rather than user data.
+
+Matching runs id-first, then name, then whatever remains is a real addition or
+removal (`diff_engine/identity_match.py`). The resulting pairing is computed
+once and shared by every domain, so parenting, constraints and animation all
+agree on which object is which.
+
+---
+
+## Snapshot Schema Versioning
+
+Snapshots outlive releases. BlenDiff's schema has grown every version — 0.3
+added render and world, 0.4 parenting and constraints, 0.5 custom properties
+and animation — and a snapshot taken before a feature existed has no data for
+it.
+
+Without version tracking, that absence is indistinguishable from deletion: a
+0.4 snapshot has no `fcurves` key, so every curve in a 0.5 snapshot reads as
+newly added and gets attributed to someone who never touched the animation.
+
+Each snapshot therefore records `schema_version` and `captured_domains`
+(`data_model/schema.py`). **A domain is diffed only when both snapshots
+captured it**; otherwise it is reported in `SceneDiff.skipped_domains` with a
+human-readable explanation in `skip_notes`, which the panel, the HTML report
+and the CLI all surface.
+
+Legacy snapshots have their captured domains *inferred* from which keys are
+physically present — exactly what those keys meant before versioning existed.
+Migration (`storage/migrate.py`) runs in memory on read, so an older BlenDiff
+can still open the sidecar; the file is only rewritten when the user calls
+`SidecarManager.migrate_file()`.
+
+Transform space is tracked the same way. Schema v1 stored transforms
+decomposed from `matrix_world`; v2 stores local transforms. The two are not
+comparable — a parented object has entirely different values in each — so a
+snapshot pair mixing them skips transform diffing rather than reporting noise.
+
+---
+
+## The Applier Registry
+
+The diff engine reports property paths across sixteen domains. The applier
+originally handled six of them through an `if/elif` chain, sending everything
+else to a debug log. The merge UI would let a user resolve a modifier or
+constraint conflict, report success, and write nothing — a silent no-op on the
+operation where silence is most dangerous.
+
+`merge_engine/property_appliers.py` makes the mapping data instead of control
+flow. Each entry pairs a path pattern with a writer, and the module exposes:
+
+* `can_apply(path)` — used by MergeEngine to mark each conflict `applicable`,
+  and by the UI to decide whether to offer resolution buttons at all;
+* `unsupported_reason(path)` — an explicit, user-facing reason for each known
+  limitation, so "cannot apply" is never an unexplained blank.
+
+Two consequences follow. Adding a diff domain without an applier is now
+*visible* rather than silent: the domain simply reports `applicable=False`
+everywhere. And conflicts BlenDiff cannot write back no longer block a merge —
+requiring a decision there would hold up the changes it *can* apply in exchange
+for a choice that would be discarded.
+
+Results are accounted per property (`ApplyResult.applied` / `.skipped` /
+`.failed`, each a named outcome) rather than per proposal, because a
+proposal-level count cannot distinguish a merge that wrote everything from one
+that wrote nothing.
+
+---
+
+## Testing Strategy
+
+Two tiers, with different purposes.
+
+**Unit tests** (900+, run in under a second without Blender) cover everything
+downstream of the extractor. This is what makes the diff engine fast to iterate
+on, and it is why the `bpy` boundary is worth defending so strictly. The merge
+applier is included here: it writes to `bpy`, but only inside writer functions
+that import it locally, so a fake `bpy` (`tests/fake_bpy.py`) exercises every
+apply path including the failure paths.
+
+**Integration tests** (`tests/integration/run_in_blender.py`, run via
+`blender --background`) cover the `extractor` package — the only code that
+touches real Blender data, and therefore the only place Blender API drift can
+break BlenDiff silently. The Blender 5.x layered action API used for F-curve
+extraction is exactly that kind of code: on Blender 5.1 the legacy
+`action.fcurves` attribute does not exist at all, so the layered path is the
+only one that runs.
+
+Scenes there are built programmatically rather than loaded from committed
+`.blend` fixtures. `.blend` is a binary format tied to a Blender version, so
+fixtures rot and cannot be reviewed in a diff; building the scene in code keeps
+the tests readable and portable across versions.
+
+CI runs the unit tier on Python 3.10–3.12, the integration tier against two
+Blender versions, and a packaging job asserting the published wheel imports
+without Blender.
