@@ -113,3 +113,32 @@ class TestSkippedDomains:
 		diff = SceneDiff(scene_name_a="A", scene_name_b="B")
 		diff.skipped_domains = ["fcurves", "drivers"]
 		assert not diff.has_changes
+
+
+class TestPackageExports:
+	"""
+	__all__ must name only things the package actually imports.
+
+	RenderDiff was listed without being imported, so `from blendiff.data_model
+	import RenderDiff` raised ImportError and a star-import raised
+	AttributeError — a public API that had never worked.
+	"""
+
+	def test_every_exported_name_resolves(self):
+		import blendiff.data_model as dm
+
+		missing = [name for name in dm.__all__ if not hasattr(dm, name)]
+		assert missing == [], f"declared in __all__ but not importable: {missing}"
+
+	def test_star_import_succeeds(self):
+		namespace = {}
+		exec("from blendiff.data_model import *", namespace)
+		assert "RenderDiff" in namespace
+
+	def test_render_diff_is_importable_by_name(self):
+		from blendiff.data_model import RenderDiff
+		assert RenderDiff().changes == []
+
+	def test_world_diff_is_importable_by_name(self):
+		from blendiff.data_model import WorldDiff
+		assert WorldDiff().changes == []
