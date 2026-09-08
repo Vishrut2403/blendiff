@@ -16,7 +16,7 @@ BlenDiff aims to be **honest about what it knows**: it will not report a change 
 - **Material node graph diffing** — per-node, per-socket comparison including image names, input values, and rewired links
 - **Render settings diffing** — engine, resolution, sampling, output format, color management, Cycles and EEVEE sub-settings
 - **Camera & light diffing** — focal length, clip planes, DOF, sensor, light type, energy, shadow, spot/area/sun settings
-- **Mesh summary diffing** — vertex/edge/face counts, bounding box, UV layers, shape keys, vertex groups
+- **Mesh geometry diffing** — content digests for vertex positions, topology and UVs, so a moved vertex is detected even when every count and bound is unchanged; plus counts, bounding box, UV layers, shape keys, vertex groups
 - **World/environment diffing** — background color, strength, HDRI filepath, ambient occlusion
 - **Modifier stack diffing** — ordered comparison of 15+ modifier types with per-param change detection
 - **Parent/child relationship diffing** — parent name, parent type, parent bone (critical for rigs)
@@ -40,7 +40,7 @@ pip install blendiff
 
 ### As a Blender addon
 
-Download the latest `blendiff-0.6.0.zip` from [Releases](https://github.com/Vishrut2403/blendiff/releases) and install via **Edit → Preferences → Add-ons → Install**.
+Download the latest `blendiff-0.7.0.zip` from [Releases](https://github.com/Vishrut2403/blendiff/releases) and install via **Edit → Preferences → Add-ons → Install**.
 
 ---
 
@@ -133,7 +133,7 @@ The applier registry (`merge_engine/property_appliers.py`) is the single source 
 
 | Applied automatically | Reported, but reconcile by hand |
 |---|---|
-| Object name, local transform, rotation mode | Mesh geometry (summarised, not stored) |
+| Object name, local transform, rotation mode | Mesh geometry (hashed, not stored) |
 | Viewport and render visibility | Modifier and constraint stacks |
 | Collection membership | Keyframes, drivers, NLA strips |
 | Material slot assignment | Material node graphs |
@@ -159,7 +159,7 @@ pytest tests/ -v -m "not integration"
 pytest tests/ -v
 ```
 
-900+ unit tests run without Blender. A further 39 integration tests exercise the `extractor` package against a real Blender, and are skipped automatically when no Blender binary is found. Point `BLENDER_BINARY` at a specific build to test against a particular version:
+950+ unit tests run without Blender. A further 46 integration tests exercise the `extractor` package against a real Blender, and are skipped automatically when no Blender binary is found. Point `BLENDER_BINARY` at a specific build to test against a particular version:
 
 ```bash
 BLENDER_BINARY=/opt/blender-4.2/blender pytest tests/integration -v

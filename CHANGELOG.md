@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.7.0 — 2026-09-09
+
+### Added
+- **Mesh geometry diffing** — meshes now carry three content digests, so
+  topology-preserving edits are detected at all. Previously mesh capture was
+  counts plus a bounding box, which meant moving a vertex inside the existing
+  bounds changed nothing BlenDiff recorded and the edit was reported as no
+  change:
+  - `mesh.vertex_positions` — a vertex moved; the model was sculpted or tweaked
+  - `mesh.topology` — faces or edges were rebuilt, subdivided, or removed
+  - `mesh.uvs` — the model is untouched but it was re-unwrapped, or a UV layer
+    was renamed
+- Digests are reported separately on purpose: positions changing while topology
+  holds steady is a very different edit from both changing, and one combined
+  flag would lose that
+- Coordinates are quantised to the serializer's float precision before hashing,
+  so a digest reflects geometry rather than float noise
+- 47 new tests, including 7 in-Blender integration tests proving a moved vertex
+  is caught while every previously-recorded count and bound stays identical
+
+### Changed
+- Snapshots record geometry digests. Older snapshots have none, and a digest is
+  only compared when both sides recorded one, so upgrading never reports a
+  phantom geometry edit
+- Releases now publish to PyPI through Trusted Publishing on a version tag, so
+  there is no long-lived API token
+
 ## 0.6.0 — 2026-09-09
 
 The theme of this release is **trustworthiness**: BlenDiff now refuses to report
