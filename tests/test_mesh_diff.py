@@ -305,3 +305,77 @@ class TestEdgeCases:
 		assert "mesh.bbox_max" in paths
 		assert "mesh.uv_layers" in paths
 		assert "mesh.shape_keys" in paths
+
+# Geometry digests
+
+class TestGeometryHashes:
+	"""
+	Counts and a bounding box cannot see a topology-preserving edit, so the
+	digests are the only thing that makes a moved vertex visible. They are
+	reported under readable names rather than the raw "hash" keys.
+	"""
+
+	def _hashed(self, **overrides):
+		mesh = _base_mesh()
+		mesh.update({
+			"vertex_hash": "v0",
+			"topology_hash": "t0",
+			"uv_hash": "u0",
+		})
+		mesh.update(overrides)
+		return mesh
+
+	def test_identical_digests_are_no_change(self):
+		assert diff_mesh_data(self._hashed(), self._hashed()) == []
+
+	def test_moved_vertex_is_detected(self):
+		"""Every count and bound is identical here; only the digest moved."""
+		changes = diff_mesh_data(self._hashed(), self._hashed(vertex_hash="v1"))
+		assert [c.property_path for c in changes] == ["mesh.vertex_positions"]
+
+	def test_topology_change_is_detected(self):
+		changes = diff_mesh_data(self._hashed(), self._hashed(topology_hash="t1"))
+		assert [c.property_path for c in changes] == ["mesh.topology"]
+
+	def test_uv_change_is_detected(self):
+		changes = diff_mesh_data(self._hashed(), self._hashed(uv_hash="u1"))
+		assert [c.property_path for c in changes] == ["mesh.uvs"]
+
+	def test_digests_are_reported_independently(self):
+		"""
+		Positions moving while topology holds means a sculpt; both moving means
+		a rebuild. Collapsing them into one flag would lose that distinction.
+		"""
+		changes = diff_mesh_data(
+			self._hashed(), self._hashed(vertex_hash="v1", topology_hash="t1"),
+		)
+		assert {c.property_path for c in changes} == {
+			"mesh.vertex_positions", "mesh.topology",
+		}
+
+	def test_raw_hash_keys_are_not_reported(self):
+		"""The key name is an implementation detail; users see the aspect."""
+		changes = diff_mesh_data(self._hashed(), self._hashed(vertex_hash="v1"))
+		assert not any("hash" in c.property_path for c in changes)
+
+	def test_digest_values_are_carried_through(self):
+		changes = diff_mesh_data(self._hashed(), self._hashed(vertex_hash="v1"))
+		assert (changes[0].old_value, changes[0].new_value) == ("v0", "v1")
+
+	def test_absent_on_one_side_is_not_a_change(self):
+		"""
+		Snapshots taken before geometry hashing have no digest. Comparing one
+		against its absence would report an edit nobody made.
+		"""
+		assert diff_mesh_data(_base_mesh(), self._hashed()) == []
+
+	def test_absent_on_both_sides_is_not_a_change(self):
+		assert diff_mesh_data(_base_mesh(), _base_mesh()) == []
+
+	def test_other_mesh_changes_still_reported_alongside(self):
+		changes = diff_mesh_data(
+			self._hashed(), self._hashed(vertex_hash="v1", vertex_count=9),
+		)
+		assert {c.property_path for c in changes} == {
+			"mesh.vertex_positions", "mesh.vertex_count",
+		}

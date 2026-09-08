@@ -406,6 +406,122 @@ def test_mesh_summary_extracted():
 
 
 @test
+def test_geometry_hashes_extracted():
+	reset_scene()
+	add_mesh("Cube")
+	data = extract()["objects"]["Cube"]["mesh_data"]
+	for key in ("vertex_hash", "topology_hash", "uv_hash"):
+		check(key in data, f"{key} must be captured")
+	check(data["vertex_hash"] != "empty", "a real mesh must produce a digest")
+
+
+@test
+def test_identical_mesh_produces_identical_hash():
+	"""If this drifts, every diff fills with phantom geometry edits."""
+	reset_scene()
+	add_mesh("Cube")
+	first = extract()["objects"]["Cube"]["mesh_data"]
+	second = extract()["objects"]["Cube"]["mesh_data"]
+	check_eq(first["vertex_hash"], second["vertex_hash"], "vertex digest is stable")
+	check_eq(first["topology_hash"], second["topology_hash"], "topology digest is stable")
+
+
+@test
+def test_moved_vertex_is_detected():
+	"""
+	The gap this feature closes. Moving a vertex inside the existing bounds
+	changes no count and no bound, so before geometry hashing BlenDiff reported
+	this edit as no change at all.
+	"""
+	reset_scene()
+	obj = add_mesh("Cube")
+	before = extract_and_serialize()
+
+	# Nudge one vertex, staying strictly inside the original bounding box so
+	# that every previously-recorded number is unchanged.
+	obj.data.vertices[0].co = (0.25, 0.25, 0.0)
+	obj.data.update()
+	after = extract_and_serialize()
+
+	mesh_a = before["objects"]["Cube"]["mesh_data"]
+	mesh_b = after["objects"]["Cube"]["mesh_data"]
+	check_eq(mesh_a["vertex_count"], mesh_b["vertex_count"], "counts unchanged")
+	check_eq(mesh_a["bbox_min"], mesh_b["bbox_min"], "bounds unchanged")
+
+	diff = DiffEngine().compare(before, after)
+	paths = {c.property_path for d in diff.modified_objects for c in d.changes}
+	check("mesh.vertex_positions" in paths,
+	      f"a moved vertex must be reported, got {sorted(paths)}")
+
+
+@test
+def test_moved_vertex_leaves_topology_hash_alone():
+	reset_scene()
+	obj = add_mesh("Cube")
+	before = extract()["objects"]["Cube"]["mesh_data"]
+	obj.data.vertices[0].co = (0.3, 0.3, 0.0)
+	obj.data.update()
+	after = extract()["objects"]["Cube"]["mesh_data"]
+
+	check(before["vertex_hash"] != after["vertex_hash"], "positions changed")
+	check_eq(before["topology_hash"], after["topology_hash"],
+	         "topology is untouched by a position edit")
+
+
+@test
+def test_topology_change_is_detected():
+	reset_scene()
+	obj = add_mesh("Cube")
+	before = extract_and_serialize()
+
+	# Subdivide, which rewrites topology.
+	modifier = obj.modifiers.new("Subdiv", "SUBSURF")
+	bpy.context.view_layer.objects.active = obj
+	bpy.ops.object.modifier_apply(modifier=modifier.name)
+	after = extract_and_serialize()
+
+	diff = DiffEngine().compare(before, after)
+	paths = {c.property_path for d in diff.modified_objects for c in d.changes}
+	check("mesh.topology" in paths, f"topology change expected, got {sorted(paths)}")
+
+
+@test
+def test_uv_change_is_detected():
+	reset_scene()
+	obj = add_mesh("Cube")
+	obj.data.uv_layers.new(name="UVMap")
+	before = extract_and_serialize()
+
+	uv_data = obj.data.uv_layers["UVMap"].data
+	uv_data[0].uv = (0.75, 0.75)
+	obj.data.update()
+	after = extract_and_serialize()
+
+	diff = DiffEngine().compare(before, after)
+	paths = {c.property_path for d in diff.modified_objects for c in d.changes}
+	check("mesh.uvs" in paths, f"UV change expected, got {sorted(paths)}")
+
+
+@test
+def test_geometry_hash_survives_a_save_load_round_trip():
+	"""
+	Digests are compared across sessions, so they must not depend on anything
+	transient in the current one.
+	"""
+	import tempfile
+	reset_scene()
+	add_mesh("Cube")
+	before = extract()["objects"]["Cube"]["mesh_data"]["vertex_hash"]
+
+	path = os.path.join(tempfile.mkdtemp(), "roundtrip.blend")
+	bpy.ops.wm.save_as_mainfile(filepath=path)
+	bpy.ops.wm.open_mainfile(filepath=path)
+
+	after = extract()["objects"]["Cube"]["mesh_data"]["vertex_hash"]
+	check_eq(after, before, "digest must survive save and reload")
+
+
+@test
 def test_modifier_stack_extracted():
 	reset_scene()
 	obj = add_mesh("Cube")

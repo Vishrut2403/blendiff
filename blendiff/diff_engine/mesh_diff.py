@@ -13,6 +13,19 @@ _FLOAT_VEC_PROPS = {"bbox_min", "bbox_max"}
 # List-of-string properties
 _ORDERED_LIST_PROPS = {"uv_layers", "shape_keys", "vertex_groups"}
 
+# Geometry digests, mapped to the property name reported to the user.
+#
+# The raw key names say "hash", which is an implementation detail; what an
+# artist wants to read is which aspect of the mesh moved. Reporting them
+# separately is the point — vertex positions changing while topology holds
+# steady means a sculpt or tweak, whereas topology changing means the mesh was
+# rebuilt.
+_HASH_PROPS = {
+	"vertex_hash": "vertex_positions",
+	"topology_hash": "topology",
+	"uv_hash": "uvs",
+}
+
 
 def _vecs_equal(a: list[float], b: list[float]) -> bool:
 	if len(a) != len(b):
@@ -55,7 +68,20 @@ def diff_mesh_data(
 		val_b = mesh_b.get(key)
 		path = f"{prefix}.{key}"
 
-		if key in _FLOAT_VEC_PROPS:
+		if key in _HASH_PROPS:
+			# Only meaningful when both snapshots recorded it. Snapshots taken
+			# before geometry hashing existed have no digest, and comparing a
+			# digest against its absence would report an edit nobody made.
+			if key not in mesh_a or key not in mesh_b:
+				continue
+			if val_a != val_b:
+				changes.append(PropertyChange(
+					property_path=f"{prefix}.{_HASH_PROPS[key]}",
+					old_value=val_a,
+					new_value=val_b,
+				))
+
+		elif key in _FLOAT_VEC_PROPS:
 			if not isinstance(val_a, list) or not isinstance(val_b, list):
 				if val_a != val_b:
 					changes.append(PropertyChange(path, val_a, val_b))

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .geometry_hash import extract_geometry_hashes
+
 
 def extract_mesh_data(obj) -> dict | None:
 	"""
@@ -29,7 +31,7 @@ def extract_mesh_data(obj) -> dict | None:
 		bbox_min = [0.0, 0.0, 0.0]
 		bbox_max = [0.0, 0.0, 0.0]
 
-	return {
+	data = {
 		# Topology counts
 		"vertex_count":   len(mesh.vertices),
 		"edge_count":     len(mesh.edges),
@@ -52,3 +54,10 @@ def extract_mesh_data(obj) -> dict | None:
 		# Vertex groups (stored on object, not mesh)
 		"vertex_groups":  [vg.name for vg in obj.vertex_groups],
 	}
+
+	# Counts and a bounding box cannot see a topology-preserving edit: move a
+	# vertex inside the existing bounds and every number above is unchanged.
+	# The digests below are what make such an edit visible at all.
+	data.update(extract_geometry_hashes(mesh))
+
+	return data
