@@ -9,7 +9,6 @@ that the serializer's type-normalisation logic is thoroughly exercised.
 
 import sys
 import os
-import math
 
 # Allow importing blendiff from the repo root without installing
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .identity_match import resolve_pairs
 from ..data_model.diff import PropertyChange
 from ..data_model.parent_diff import ParentDiff
 
@@ -32,14 +33,15 @@ def diff_parent_info(
 def diff_all_parents(
 	objs_a: dict[str, dict],
 	objs_b: dict[str, dict],
+	pairs: list[tuple[str, str]] | None = None,
 ) -> list[ParentDiff]:
 	results: list[ParentDiff] = []
 
-	for name in sorted(set(objs_a) & set(objs_b)):
+	for name_a, name_b in resolve_pairs(objs_a, objs_b, pairs):
 		diff = diff_parent_info(
-			obj_name=name,
-			parent_a=objs_a[name].get("parent"),
-			parent_b=objs_b[name].get("parent"),
+			obj_name=name_b,
+			parent_a=objs_a[name_a].get("parent"),
+			parent_b=objs_b[name_b].get("parent"),
 		)
 		if diff.changes:
 			results.append(diff)

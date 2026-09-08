@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .identity_match import resolve_pairs
 from ..data_model.diff import PropertyChange
 from ..data_model.nla_diff import NLADiff
 
@@ -120,15 +121,16 @@ def diff_nla_tracks(
 def diff_all_nla(
 	objs_a: dict[str, dict],
 	objs_b: dict[str, dict],
+	pairs: list[tuple[str, str]] | None = None,
 ) -> list[NLADiff]:
 	
 	results: list[NLADiff] = []
 
-	for name in sorted(set(objs_a) & set(objs_b)):
+	for name_a, name_b in resolve_pairs(objs_a, objs_b, pairs):
 		diff = diff_nla_tracks(
-			obj_name=name,
-			tracks_a=objs_a[name].get("nla_tracks", []),
-			tracks_b=objs_b[name].get("nla_tracks", []),
+			obj_name=name_b,
+			tracks_a=objs_a[name_a].get("nla_tracks", []),
+			tracks_b=objs_b[name_b].get("nla_tracks", []),
 		)
 		if diff.changes:
 			results.append(diff)

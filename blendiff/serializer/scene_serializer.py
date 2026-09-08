@@ -13,7 +13,7 @@ class SceneSerializer:
 		self._precision = float_precision
 
 	def serialize(self, raw: dict) -> dict:
-		return {
+		result = {
 			"blender_version": raw["blender_version"],
 			"scene_name":      raw["scene_name"],
 			"objects":         {
@@ -26,19 +26,43 @@ class SceneSerializer:
 			},
 			"render": self._serialize_render(raw.get("render", {})),
 			"world":  self._serialize_world(raw.get("world")),
+			"scene_custom_props": raw.get("scene_custom_props", {}),
 		}
+
+		# Carry the extractor's schema stamp through untouched. Without it the
+		# snapshot would look like a legacy one and every domain added since
+		# would be re-inferred rather than trusted.
+		if "schema_version" in raw:
+			result["schema_version"] = raw["schema_version"]
+		if "captured_domains" in raw:
+			result["captured_domains"] = list(raw["captured_domains"])
+		if "transform_space" in raw:
+			result["transform_space"] = raw["transform_space"]
+
+		return result
 
 	def _serialize_object(self, obj: dict) -> dict:
 		return {
 			"name":            obj["name"],
+			"blendiff_id":     obj.get("blendiff_id"),
 			"type":            obj["type"],
 			"collection_path": obj["collection_path"],
+			"collection_paths": list(
+				obj.get("collection_paths")
+				or ([obj["collection_path"]] if obj.get("collection_path") else [])
+			),
 			"transform":       self._serialize_transform(obj["transform"]),
 			"material_slots":  [
 				self._serialize_material_slot(s)
 				for s in obj.get("material_slots", [])
 			],
 			"visible":         bool(obj.get("visible", True)),
+			"hide_viewport":   bool(obj.get("hide_viewport", not obj.get("visible", True))),
+			"hide_render":     bool(obj.get("hide_render", False)),
+			"visible_in_viewlayer": (
+				None if obj.get("visible_in_viewlayer") is None
+				else bool(obj["visible_in_viewlayer"])
+			),
 			"camera_data":     obj.get("camera_data"),
 			"light_data":      obj.get("light_data"),
 			"mesh_data":       obj.get("mesh_data"),
@@ -52,11 +76,23 @@ class SceneSerializer:
 		}
 
 	def _serialize_transform(self, t: dict) -> dict:
-		return {
+		result = {
 			"location":       self._vec_to_list(t["location"]),
 			"rotation_euler": self._vec_to_list(t["rotation_euler"]),
 			"scale":          self._vec_to_list(t["scale"]),
+			# The same Euler triple means different orientations under
+			# different modes, so the mode is part of the transform.
+			"rotation_mode":  str(t.get("rotation_mode", "XYZ")),
 		}
+
+		# Only present for objects actually driven by these channels; storing
+		# them for every object would add noise the user cannot act on.
+		if "rotation_quaternion" in t:
+			result["rotation_quaternion"] = self._vec_to_list(t["rotation_quaternion"])
+		if "rotation_axis_angle" in t:
+			result["rotation_axis_angle"] = self._vec_to_list(t["rotation_axis_angle"])
+
+		return result
 
 	def _serialize_material_slot(self, slot: dict) -> dict:
 		return {

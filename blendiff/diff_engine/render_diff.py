@@ -12,23 +12,23 @@ _FLOAT_PROPS = {"fps_base", "exposure", "gamma"}
 _EPSILON = 1e-6
 
 _SUB_DICTS = {
-    "cycles": "cycles",
-    "eevee": "eevee",
+	"cycles": "cycles",
+	"eevee": "eevee",
 }
 
 
 def _floats_equal(a: float, b: float) -> bool:
-    return abs(a - b) < _EPSILON
+	return abs(a - b) < _EPSILON
 
 
 def _values_equal(key: str, a: Any, b: Any) -> bool:
-    if key in _FLOAT_PROPS and isinstance(a, float) and isinstance(b, float):
-        return _floats_equal(a, b)
-    return a == b
+	if key in _FLOAT_PROPS and isinstance(a, float) and isinstance(b, float):
+		return _floats_equal(a, b)
+	return a == b
 
 
 def diff_render_settings(snapshot_a: dict, snapshot_b: dict) -> RenderDiff:
-    """
+	"""
     Compare two render-settings dicts (as produced by render_extractor).
 
     Parameters
@@ -41,44 +41,44 @@ def diff_render_settings(snapshot_a: dict, snapshot_b: dict) -> RenderDiff:
     RenderDiff
         Contains a PropertyChange for every property that differs.
     """
-    changes: list[PropertyChange] = []
+	changes: list[PropertyChange] = []
 
-    def _compare(dict_a: dict, dict_b: dict, prefix: str) -> None:
-        all_keys = set(dict_a) | set(dict_b)
-        for key in sorted(all_keys):
-            path = f"{prefix}.{key}" if prefix else key
+	def _compare(dict_a: dict, dict_b: dict, prefix: str) -> None:
+		all_keys = set(dict_a) | set(dict_b)
+		for key in sorted(all_keys):
+			path = f"{prefix}.{key}" if prefix else key
 
-            val_a = dict_a.get(key)
-            val_b = dict_b.get(key)
+			val_a = dict_a.get(key)
+			val_b = dict_b.get(key)
 
-            # Both are sub-dicts → recurse
-            if isinstance(val_a, dict) and isinstance(val_b, dict):
-                _compare(val_a, val_b, path)
-                continue
+			# Both are sub-dicts → recurse
+			if isinstance(val_a, dict) and isinstance(val_b, dict):
+				_compare(val_a, val_b, path)
+				continue
 
-            # One side missing
-            if val_a is None and val_b is not None:
-                changes.append(PropertyChange(
-                    property_path=path,
-                    old_value=None,
-                    new_value=val_b,
-                ))
-                continue
-            if val_a is not None and val_b is None:
-                changes.append(PropertyChange(
-                    property_path=path,
-                    old_value=val_a,
-                    new_value=None,
-                ))
-                continue
+			# One side missing
+			if val_a is None and val_b is not None:
+				changes.append(PropertyChange(
+					property_path=path,
+					old_value=None,
+					new_value=val_b,
+				))
+				continue
+			if val_a is not None and val_b is None:
+				changes.append(PropertyChange(
+					property_path=path,
+					old_value=val_a,
+					new_value=None,
+				))
+				continue
 
-            # Regular comparison
-            if not _values_equal(key, val_a, val_b):
-                changes.append(PropertyChange(
-                    property_path=path,
-                    old_value=val_a,
-                    new_value=val_b,
-                ))
+			# Regular comparison
+			if not _values_equal(key, val_a, val_b):
+				changes.append(PropertyChange(
+					property_path=path,
+					old_value=val_a,
+					new_value=val_b,
+				))
 
-    _compare(snapshot_a, snapshot_b, "render")
-    return RenderDiff(changes=changes)
+	_compare(snapshot_a, snapshot_b, "render")
+	return RenderDiff(changes=changes)

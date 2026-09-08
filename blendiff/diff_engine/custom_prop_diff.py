@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .identity_match import resolve_pairs
 from ..data_model.diff import PropertyChange
 from ..data_model.custom_prop_diff import CustomPropDiff
 
@@ -57,15 +58,16 @@ def diff_custom_props(
 def diff_all_custom_props(
 	objs_a: dict[str, dict],
 	objs_b: dict[str, dict],
+	pairs: list[tuple[str, str]] | None = None,
 ) -> list[CustomPropDiff]:
 
 	results: list[CustomPropDiff] = []
 
-	for name in sorted(set(objs_a) & set(objs_b)):
+	for name_a, name_b in resolve_pairs(objs_a, objs_b, pairs):
 		diff = diff_custom_props(
-			obj_name=name,
-			props_a=objs_a[name].get("custom_props"),
-			props_b=objs_b[name].get("custom_props"),
+			obj_name=name_b,
+			props_a=objs_a[name_a].get("custom_props"),
+			props_b=objs_b[name_b].get("custom_props"),
 		)
 		if diff.changes:
 			results.append(diff)

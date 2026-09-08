@@ -21,10 +21,12 @@ class TestSceneDiff:
 		diff = self._make_diff()
 		assert not diff.has_changes
 		assert diff.summary() == {
-			"added": 0, "removed": 0, "modified": 0, "collection_changes": 0,
+			"added": 0, "removed": 0, "modified": 0, "renamed": 0,
+			"collection_changes": 0,
 			"render_changes": 0, "world_changes": 0, "parent_changes": 0,
 			"constraint_changes": 0, "custom_prop_changes": 0,
 			"fcurve_changes" : 0, "driver_changes": 0, "nla_changes": 0,
+			"scene_custom_prop_changes": 0, "skipped_domains": 0,
 		}
 
 	def test_added_objects_property(self):
@@ -61,3 +63,53 @@ class TestSceneDiff:
 		diff = self._make_diff()
 		diff.collection_diffs = [CollectionDiff(path="Props", kind=ChangeKind.ADDED)]
 		assert diff.has_changes
+
+
+class TestObjectDiffRename:
+	"""
+	A rename must stay a single modified object. Matching on name alone turned
+	it into a delete plus an unrelated add, discarding every other change.
+	"""
+
+	def test_no_previous_name_is_not_a_rename(self):
+		diff = ObjectDiff(name="Cube", kind=ChangeKind.MODIFIED)
+		assert not diff.was_renamed
+		assert diff.display_name == "Cube"
+
+	def test_same_previous_name_is_not_a_rename(self):
+		diff = ObjectDiff(name="Cube", kind=ChangeKind.MODIFIED, previous_name="Cube")
+		assert not diff.was_renamed
+
+	def test_different_previous_name_is_a_rename(self):
+		diff = ObjectDiff(
+			name="Body_LOW", kind=ChangeKind.MODIFIED, previous_name="Cube"
+		)
+		assert diff.was_renamed
+		assert diff.display_name == "Cube \u2192 Body_LOW"
+
+	def test_renamed_objects_collected_on_scene_diff(self):
+		diff = SceneDiff(scene_name_a="A", scene_name_b="B")
+		diff.object_diffs = [
+			ObjectDiff(name="Body_LOW", kind=ChangeKind.MODIFIED, previous_name="Cube"),
+			ObjectDiff(name="Lamp", kind=ChangeKind.MODIFIED),
+		]
+		assert [d.name for d in diff.renamed_objects] == ["Body_LOW"]
+		assert diff.summary()["renamed"] == 1
+
+
+class TestSkippedDomains:
+	def test_no_skipped_domains_by_default(self):
+		diff = SceneDiff(scene_name_a="A", scene_name_b="B")
+		assert not diff.has_skipped_domains
+
+	def test_skipped_domains_reported(self):
+		diff = SceneDiff(scene_name_a="A", scene_name_b="B")
+		diff.skipped_domains = ["fcurves"]
+		assert diff.has_skipped_domains
+		assert diff.summary()["skipped_domains"] == 1
+
+	def test_skipped_domains_are_not_changes(self):
+		"""A skipped domain is missing information, not a detected change."""
+		diff = SceneDiff(scene_name_a="A", scene_name_b="B")
+		diff.skipped_domains = ["fcurves", "drivers"]
+		assert not diff.has_changes

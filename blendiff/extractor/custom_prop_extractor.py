@@ -3,13 +3,19 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from .identity import ID_KEY
+
 log = logging.getLogger(__name__)
 
-# bpy internal keys to always skip — these are Blender internals, not user data
+# Keys to always skip. These are Blender internals or BlenDiff's own
+# bookkeeping — not user data — and reporting them as custom-property changes
+# would be noise. ID_KEY in particular is written by BlenDiff itself, so
+# surfacing it would make every newly stamped object look edited.
 _SKIP_KEYS = {
 	"_RNA_UI",
 	"cycles",
 	"cycles_visibility",
+	ID_KEY,
 }
 
 

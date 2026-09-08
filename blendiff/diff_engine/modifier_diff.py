@@ -54,9 +54,8 @@ def diff_modifier_stack(
 	"""
 	changes: list[PropertyChange] = []
 
-	max_len = max(len(stack_a), len(stack_b), 1)
-	map_a = {m["index"]: m for m in stack_a}
-	map_b = {m["index"]: m for m in stack_b}
+	map_a = {m["index"]: m for m in stack_a or []}
+	map_b = {m["index"]: m for m in stack_b or []}
 	all_indices = sorted(set(map_a) | set(map_b))
 
 	for idx in all_indices:
@@ -83,20 +82,20 @@ def diff_modifier_stack(
 			continue
 
 		# Type changed — report as a single slot replacement
-		if mod_a["type"] != mod_b["type"]:
+		if mod_a.get("type") != mod_b.get("type"):
 			changes.append(PropertyChange(
 				property_path=f"{path_base}.type",
-				old_value=mod_a["type"],
-				new_value=mod_b["type"],
+				old_value=mod_a.get("type"),
+				new_value=mod_b.get("type"),
 			))
 			continue  # skip param diff when type changed — it's noise
 
 		# Name changed
-		if mod_a["name"] != mod_b["name"]:
+		if mod_a.get("name") != mod_b.get("name"):
 			changes.append(PropertyChange(
 				property_path=f"{path_base}.name",
-				old_value=mod_a["name"],
-				new_value=mod_b["name"],
+				old_value=mod_a.get("name"),
+				new_value=mod_b.get("name"),
 			))
 
 		# Visibility

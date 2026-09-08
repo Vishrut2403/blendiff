@@ -325,3 +325,57 @@ class TestSceneDiffIntegration:
 			PropertyChange("constraints[0].influence", 1.0, 0.5)
 		])]
 		assert diff.summary()["constraint_changes"] == 1
+
+# Malformed input robustness
+
+class TestMalformedConstraintEntries:
+	"""
+	A constraint entry missing a key must degrade, not raise.
+
+	Snapshots are long-lived and extraction is best-effort per object, so a
+	partially-populated entry is a real possibility. Indexing with [] made one
+	malformed entry take down the entire scene diff with a KeyError.
+	"""
+
+	def _stack(self, **overrides):
+		entry = {
+			"index": 0, "name": "Copy Location", "type": "COPY_LOCATION",
+			"enabled": True, "influence": 1.0, "params": {},
+		}
+		entry.update(overrides)
+		return [entry]
+
+	def test_missing_enabled_does_not_raise(self):
+		a = self._stack()
+		b = self._stack()
+		del b[0]["enabled"]
+		diff = diff_constraint_stack(a, b, obj_name="Cube")
+		assert any("enabled" in c.property_path for c in diff.changes)
+
+	def test_missing_influence_does_not_raise(self):
+		a = self._stack()
+		b = self._stack()
+		del b[0]["influence"]
+		diff = diff_constraint_stack(a, b, obj_name="Cube")
+		assert any("influence" in c.property_path for c in diff.changes)
+
+	def test_both_missing_influence_is_no_change(self):
+		a = self._stack()
+		b = self._stack()
+		del a[0]["influence"]
+		del b[0]["influence"]
+		assert diff_constraint_stack(a, b, obj_name="Cube").changes == []
+
+	def test_missing_type_does_not_raise(self):
+		a = self._stack()
+		b = self._stack()
+		del b[0]["type"]
+		diff = diff_constraint_stack(a, b, obj_name="Cube")
+		assert any("type" in c.property_path for c in diff.changes)
+
+	def test_none_stack_is_treated_as_empty(self):
+		assert diff_constraint_stack(None, None, obj_name="Cube").changes == []
+
+	def test_none_stack_against_populated_reports_removal(self):
+		diff = diff_constraint_stack(self._stack(), None, obj_name="Cube")
+		assert len(diff.changes) == 1

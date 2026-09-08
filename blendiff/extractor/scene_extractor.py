@@ -15,6 +15,9 @@ from .custom_prop_extractor import extract_custom_props
 from .fcurve_extractor import extract_fcurves
 from .driver_extractor import extract_drivers
 from .nla_extractor import extract_nla_tracks
+from .scene_custom_prop_extractor import extract_scene_custom_props
+from .identity import read_id, stamp_scene
+from ..data_model import schema
 
 log = logging.getLogger(__name__)
 
@@ -25,48 +28,112 @@ class SceneExtractor:
 	# Public API
 
 	@classmethod
-	def extract(cls, context: Any) -> dict:
-		
+	def extract(cls, context: Any, stamp_identity: bool = False) -> dict:
+		"""
+		Extract the active scene into a plain, JSON-ready dict.
+
+		Parameters
+		----------
+		context:
+			``bpy.context``.
+		stamp_identity:
+			When True, objects lacking a persistent BlenDiff id are given one.
+			This writes to the .blend and therefore marks it modified, so it is
+			reserved for snapshot capture — an action the user explicitly asked
+			for. A read-only diff leaves this False and simply records whichever
+			ids already exist.
+		"""
 		import bpy  # local import keeps module importable outside Blender
 
 		scene = context.scene
 		version = bpy.app.version_string
 
-		return {
+		if stamp_identity:
+			try:
+				stamped = stamp_scene(scene)
+				if stamped:
+					log.info("Stamped %d object(s) with a BlenDiff identity.", stamped)
+			except Exception as exc:
+				log.warning("Could not stamp object identities: %s", exc)
+
+		collections = cls._extract_collection_tree(scene.collection)
+		# Objects record their collection membership as full paths, so the
+		# tree must be walked before objects are extracted.
+		path_lookup = cls._build_collection_path_lookup(collections)
+
+		raw = {
 			"blender_version": version,
 			"scene_name":      scene.name,
-			"objects":         cls._extract_all_objects(scene),
-			"collections":     cls._extract_collection_tree(scene.collection),
+			"objects":         cls._extract_all_objects(scene, path_lookup),
+			"collections":     collections,
 			"render":          extract_render_settings(scene),
 			"world":           extract_world_data(scene),
+			"scene_custom_props": extract_scene_custom_props(scene),
 		}
+
+		# Record which domains this snapshot actually captured, so a future
+		# release diffing against it never invents changes for a domain that
+		# did not exist yet.
+		return schema.stamp(raw, cls._captured_domains())
+
+	@staticmethod
+	def _captured_domains() -> tuple[str, ...]:
+		"""
+		Domains this extractor version captures.
+
+		Every domain is attempted for every object; individual failures are
+		logged and leave that object's entry empty rather than un-captured, so
+		the domain list is static.
+		"""
+		return schema.ALL_DOMAINS
 
 	# Object extraction
 
 	@classmethod
-	def _extract_all_objects(cls, scene: Any) -> dict[str, dict]:
+	def _extract_all_objects(
+		cls,
+		scene: Any,
+		path_lookup: dict[str, list[str]] | None = None,
+	) -> dict[str, dict]:
 		"""Return a dict keyed by object name."""
 		result: dict[str, dict] = {}
 		for obj in scene.objects:
 			try:
-				data = cls._extract_object(obj)
+				data = cls._extract_object(obj, path_lookup or {})
 				result[obj.name] = data
 			except Exception as exc:
 				log.warning("Failed to extract object %r: %s", obj.name, exc)
 		return result
 
 	@classmethod
-	def _extract_object(cls, obj: Any) -> dict:
+	def _extract_object(cls, obj: Any, path_lookup: dict[str, list[str]]) -> dict:
 		"""Extract a single bpy.types.Object."""
 		obj_type = obj.type
 
+		paths = cls._collection_paths(obj, path_lookup)
+
 		data = {
 			"name":            obj.name,
+			# Persistent identity, so a rename stays one object across
+			# snapshots instead of a delete plus an add. None when the object
+			# was never stamped or is linked from another file.
+			"blendiff_id":     read_id(obj),
 			"type":            obj_type,
-			"collection_path": cls._collection_path(obj),
+			# Primary path, kept for backwards compatibility with snapshots
+			# and reports that assume a single collection.
+			"collection_path": paths[0] if paths else "",
+			# Full membership: an object can be linked into several collections
+			# at once, and losing that hides real scene-organisation changes.
+			"collection_paths": paths,
 			"transform":       cls._extract_transform(obj),
 			"material_slots":  cls._extract_material_slots(obj),
 			"visible":         not obj.hide_viewport,
+			"hide_viewport":   bool(obj.hide_viewport),
+			# Viewport and render visibility are independent switches, and an
+			# object hidden in one but not the other is a common source of
+			# "why is it missing from the render?" — so both are tracked.
+			"hide_render":     bool(getattr(obj, "hide_render", False)),
+			"visible_in_viewlayer": cls._visible_in_viewlayer(obj),
 			"parent":          None,
 			"camera_data":     None,
 			"light_data":      None,
@@ -137,13 +204,53 @@ class SceneExtractor:
 
 	@classmethod
 	def _extract_transform(cls, obj: Any) -> dict:
+		"""
+		Extract the object's **local** transform.
 
-		loc, rot, scale = obj.matrix_world.decompose()
-		return {
-			"location":       loc,
-			"rotation_euler": rot.to_euler(),  # convert quaternion → Euler
-			"scale":          scale,
+		This deliberately does not decompose ``matrix_world``. World space is
+		wrong here for two reasons:
+
+		* Moving a parent changes the world transform of every descendant, so a
+		  single edit is reported as a change on dozens of untouched objects.
+		* The merge applier writes to ``obj.location`` / ``rotation_euler`` /
+		  ``scale``, which are local. Feeding world-space values into local
+		  properties teleports any parented object.
+
+		``rotation_mode`` is recorded alongside the Euler because the same
+		numbers mean different orientations under different modes, and because
+		quaternion- and axis-angle-mode objects need their native values to
+		round-trip correctly.
+		"""
+		mode = getattr(obj, "rotation_mode", "XYZ")
+
+		transform = {
+			"location":       tuple(obj.location),
+			"rotation_euler": tuple(obj.rotation_euler),
+			"scale":          tuple(obj.scale),
+			"rotation_mode":  mode,
 		}
+
+		# Euler values are meaningless when the object is driven by a
+		# quaternion or axis-angle, so capture the authoritative channel too.
+		if mode == "QUATERNION":
+			transform["rotation_quaternion"] = tuple(obj.rotation_quaternion)
+		elif mode == "AXIS_ANGLE":
+			transform["rotation_axis_angle"] = tuple(obj.rotation_axis_angle)
+
+		return transform
+
+	@classmethod
+	def _visible_in_viewlayer(cls, obj: Any) -> bool | None:
+		"""
+		Effective visibility in the active view layer.
+
+		``visible_get()`` needs an evaluated view layer and raises for objects
+		outside it, so a failure records "unknown" rather than guessing.
+		"""
+		try:
+			return bool(obj.visible_get())
+		except Exception:
+			return None
 
 	@classmethod
 	def _extract_material_slots(cls, obj: Any) -> list[dict]:
@@ -214,7 +321,50 @@ class SceneExtractor:
 	# Helpers
 
 	@classmethod
-	def _collection_path(cls, obj: Any) -> str:
-		for col in obj.users_collection:
-			return col.name
-		return ""
+	def _build_collection_path_lookup(
+		cls,
+		collections: dict[str, dict],
+	) -> dict[str, list[str]]:
+		"""
+		Map each collection name to every full path it occupies.
+
+		A collection can be linked under more than one parent, so the mapping
+		is one-to-many. Paths are sorted for deterministic output.
+		"""
+		lookup: dict[str, list[str]] = {}
+		for path, node in collections.items():
+			lookup.setdefault(node["name"], []).append(path)
+		for paths in lookup.values():
+			paths.sort()
+		return lookup
+
+	@classmethod
+	def _collection_paths(
+		cls,
+		obj: Any,
+		path_lookup: dict[str, list[str]],
+	) -> list[str]:
+		"""
+		Full paths of every collection this object belongs to.
+
+		Previously only the first collection's bare *name* was recorded, which
+		could not be matched against the collection tree (keyed by full path)
+		and silently dropped multi-collection membership entirely.
+		"""
+		paths: list[str] = []
+		try:
+			users = list(obj.users_collection)
+		except Exception as exc:
+			log.warning("Could not read collections for %r: %s", obj.name, exc)
+			return []
+
+		for col in users:
+			resolved = path_lookup.get(col.name)
+			if resolved:
+				paths.extend(resolved)
+			else:
+				# Collection outside this scene's tree (e.g. linked); its bare
+				# name is the best identifier available.
+				paths.append(col.name)
+
+		return sorted(set(paths))

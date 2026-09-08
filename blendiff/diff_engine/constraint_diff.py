@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .identity_match import resolve_pairs
 from ..data_model.diff import PropertyChange
 from ..data_model.constraint_diff import ConstraintDiff
 
@@ -37,6 +38,13 @@ def _params_changes(
 	return changes
 
 
+def _floats_equal_or_none(a, b) -> bool:
+	"""Compare two possibly-absent floats without assuming either exists."""
+	if a is None or b is None:
+		return a is b or a == b
+	return _floats_equal(a, b)
+
+
 def diff_constraint_stack(
 	stack_a: list[dict],
 	stack_b: list[dict],
@@ -46,8 +54,8 @@ def diff_constraint_stack(
 
 	changes: list[PropertyChange] = []
 
-	map_a = {c["index"]: c for c in stack_a}
-	map_b = {c["index"]: c for c in stack_b}
+	map_a = {c["index"]: c for c in stack_a or []}
+	map_b = {c["index"]: c for c in stack_b or []}
 	all_indices = sorted(set(map_a) | set(map_b))
 
 	for idx in all_indices:
@@ -63,23 +71,36 @@ def diff_constraint_stack(
 			changes.append(PropertyChange(slot, con_a.get("name"), None))
 			continue
 
+		# Fields are read with .get so that a constraint entry missing a key —
+		# an older snapshot, or an extraction that partially failed — degrades
+		# to "no change detected" instead of raising KeyError and taking the
+		# entire scene diff down with it.
+
 		# Type changed — treat as a full replacement, no deep dive
-		if con_a["type"] != con_b["type"]:
-			changes.append(PropertyChange(f"{slot}.type", con_a["type"], con_b["type"]))
+		if con_a.get("type") != con_b.get("type"):
+			changes.append(PropertyChange(
+				f"{slot}.type", con_a.get("type"), con_b.get("type"),
+			))
 			continue
 
 		# Name changed
-		if con_a["name"] != con_b["name"]:
-			changes.append(PropertyChange(f"{slot}.name", con_a["name"], con_b["name"]))
+		if con_a.get("name") != con_b.get("name"):
+			changes.append(PropertyChange(
+				f"{slot}.name", con_a.get("name"), con_b.get("name"),
+			))
 
 		# Enabled
-		if con_a["enabled"] != con_b["enabled"]:
-			changes.append(PropertyChange(f"{slot}.enabled", con_a["enabled"], con_b["enabled"]))
+		if con_a.get("enabled") != con_b.get("enabled"):
+			changes.append(PropertyChange(
+				f"{slot}.enabled", con_a.get("enabled"), con_b.get("enabled"),
+			))
 
 		# Influence
-		if not _floats_equal(con_a["influence"], con_b["influence"]):
+		influence_a = con_a.get("influence")
+		influence_b = con_b.get("influence")
+		if not _floats_equal_or_none(influence_a, influence_b):
 			changes.append(PropertyChange(
-				f"{slot}.influence", con_a["influence"], con_b["influence"]
+				f"{slot}.influence", influence_a, influence_b,
 			))
 
 		# Type-specific params
@@ -94,15 +115,16 @@ def diff_constraint_stack(
 def diff_all_constraints(
 	objs_a: dict[str, dict],
 	objs_b: dict[str, dict],
+	pairs: list[tuple[str, str]] | None = None,
 ) -> list[ConstraintDiff]:
 	
 	results: list[ConstraintDiff] = []
 
-	for name in sorted(set(objs_a) & set(objs_b)):
+	for name_a, name_b in resolve_pairs(objs_a, objs_b, pairs):
 		diff = diff_constraint_stack(
-			stack_a=objs_a[name].get("constraint_stack", []),
-			stack_b=objs_b[name].get("constraint_stack", []),
-			obj_name=name,
+			stack_a=objs_a[name_a].get("constraint_stack", []),
+			stack_b=objs_b[name_b].get("constraint_stack", []),
+			obj_name=name_b,
 		)
 		if diff.changes:
 			results.append(diff)
