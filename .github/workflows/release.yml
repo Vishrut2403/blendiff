@@ -1,0 +1,117 @@
+name: Release
+
+# Publishes to PyPI when a version tag is pushed.
+#
+# Authentication is via PyPI Trusted Publishing (OpenID Connect): GitHub mints
+# a short-lived token for this specific workflow, and PyPI verifies it against
+# the publisher registered on the project. There is no long-lived API token
+# stored anywhere, so there is nothing to leak or rotate.
+#
+# To cut a release:
+#   1. bump __version__ in blendiff/__init__.py
+#   2. update CHANGELOG.md
+#   3. git tag -a v0.7.0 -m "v0.7.0" && git push origin v0.7.0
+
+on:
+  push:
+    tags: ["v*"]
+
+# Default to read-only; the publish job opts into id-token explicitly.
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify tag matches package version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # The tag is the only thing a human types, and blendiff/__init__.py is
+      # the single source of the version. If they disagree, the release would
+      # publish a version nobody expects — fail loudly instead.
+      - name: Compare tag to __version__
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG=$(python -c "import re,pathlib; \
+            print(re.search(r'__version__ = \"([^\"]+)\"', \
+            pathlib.Path('blendiff/__init__.py').read_text()).group(1))")
+          echo "tag=$TAG  package=$PKG"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error::Tag v$TAG does not match __version__ $PKG in blendiff/__init__.py"
+            exit 1
+          fi
+
+  test:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - run: pip install -e ".[dev]"
+
+      # Only the Blender-free tier gates the release. The integration tier
+      # already runs on every push to main, and downloading Blender here would
+      # add minutes to a release for coverage that has not changed since.
+      - run: pytest tests/ -q -m "not integration"
+
+  build:
+    name: Build distributions
+    needs: [verify, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build sdist and wheel
+        run: |
+          pip install build
+          python -m build
+
+      - name: Check metadata
+        run: |
+          pip install --upgrade twine
+          twine check dist/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    name: Publish to PyPI
+    needs: [build]
+    runs-on: ubuntu-latest
+
+    # Must match the environment name registered on the PyPI publisher, and an
+    # environment of this name must exist in the repository settings.
+    environment:
+      name: pypi
+      url: https://pypi.org/project/blendiff/
+
+    permissions:
+      # This is what replaces the API token. It lets the job request an OIDC
+      # identity token that PyPI trusts. Nothing else in the workflow needs it,
+      # which is why publishing is a separate job with no source checkout.
+      id-token: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish
+        uses: pypa/gh-action-pypi-publish@release/v1
