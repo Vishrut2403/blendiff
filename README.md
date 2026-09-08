@@ -40,7 +40,7 @@ pip install blendiff
 
 ### As a Blender addon
 
-Download the latest `blendiff-0.8.0.zip` from [Releases](https://github.com/Vishrut2403/blendiff/releases) and install via **Edit → Preferences → Add-ons → Install**.
+Download the latest `blendiff-0.7.0.zip` from [Releases](https://github.com/Vishrut2403/blendiff/releases) and install via **Edit → Preferences → Add-ons → Install**.
 
 ---
 

@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Content-addressed snapshot storage** — each distinct object is stored once
+  and referenced by digest, instead of every snapshot storing the whole scene
+  again. On a realistic project (80 objects, 50 snapshots, a handful of edits
+  each) the sidecar drops from **24.6 MB to 1.6 MB** and parse time from
+  **280 ms to 17 ms** — 15x smaller, 17x faster. The cost previously grew with
+  disciplined use, so an artist who snapshotted before each session was
+  punished for it
+- Deleting a snapshot now reclaims the objects nothing else references, so
+  removing history actually frees space
+- `SidecarManager.storage_stats()` reports how much deduplication is saving
+- Releases attach the Blender addon zip automatically, with notes taken from
+  the changelog. A tag push now performs the entire release: verify, test,
+  build, publish to PyPI, create the GitHub release with the addon attached
+
+### Changed
+- Sidecar format version is now `0.3`. Files written by 0.1 and 0.2 store
+  objects inline, still open unchanged, and are packed the first time anything
+  is written
+- The sidecar remains a single human-readable JSON file. A directory-based
+  object store was measured and rejected: deduplication alone removes the cost,
+  and a directory would have given up both the single readable file and the
+  `blendiff list scene.blendiff` path contract
+
 ## 0.7.0 — 2026-09-09
 
 ### Added
