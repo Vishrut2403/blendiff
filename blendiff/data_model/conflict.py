@@ -42,6 +42,18 @@ class Resolution(str, Enum):
 	AUTO       = "auto"
 
 
+# Merge target kinds
+#
+# Merging is not only about objects: collection membership, render settings and
+# scene custom properties conflict just as readily, and a proposal has to say
+# what it is about so the UI can group and the applier can dispatch correctly.
+
+class TargetKind(str, Enum):
+	OBJECT     = "object"
+	COLLECTION = "collection"
+	SCENE      = "scene"
+
+
 # Property-level conflict
 
 @dataclass
@@ -53,6 +65,13 @@ class PropertyConflict:
 	value_a     — value in version A
 	value_b     — value in version B
 	resolution  — set by the user or auto-resolved
+
+	``applicable`` records whether BlenDiff can actually write the chosen value
+	back to the scene. Not every property BlenDiff can *detect* is one it can
+	*apply* — mesh geometry is summarised rather than stored, for instance. The
+	flag is set by MergeEngine from the applier registry so the UI can present
+	those conflicts as informational instead of soliciting a resolution it
+	would then silently discard.
 	"""
 	property_path: str
 	base_value:    Any
@@ -60,6 +79,8 @@ class PropertyConflict:
 	value_b:       Any
 	kind:          ConflictKind
 	resolution:    Resolution = Resolution.UNRESOLVED
+	applicable:    bool = True
+	unsupported_reason: str = ""
 
 	@property
 	def is_resolved(self) -> bool:
@@ -67,12 +88,21 @@ class PropertyConflict:
 
 	@property
 	def resolved_value(self) -> Any:
-		"""Return the value selected by the resolution."""
+		"""
+		Return the value selected by the resolution.
+
+		AUTO resolves to ``value_a``, not ``base_value``. AUTO means both
+		sides made the *identical* change, so the agreed value is that change
+		— returning the common ancestor's value instead would silently revert
+		an edit both artists had made.
+		"""
 		if self.resolution == Resolution.USE_A:
 			return self.value_a
 		if self.resolution == Resolution.USE_B:
 			return self.value_b
-		if self.resolution in (Resolution.USE_BASE, Resolution.AUTO):
+		if self.resolution == Resolution.AUTO:
+			return self.value_a
+		if self.resolution == Resolution.USE_BASE:
 			return self.base_value
 		raise ValueError(f"Conflict on '{self.property_path}' is not resolved yet.")
 
@@ -90,6 +120,8 @@ class NonConflictingChange:
 	base_value:    Any
 	new_value:     Any
 	source:        str
+	applicable:    bool = True
+	unsupported_reason: str = ""
 
 
 # Per-object merge proposal
@@ -110,15 +142,52 @@ class MergeProposal:
 	non_conflicting_from_a: list[NonConflictingChange] = field(default_factory=list)
 	non_conflicting_from_b: list[NonConflictingChange] = field(default_factory=list)
 	structural_conflict:  bool                         = False
+	target_kind:          TargetKind                   = TargetKind.OBJECT
+	# Name this target carried in the base snapshot, when it was renamed. The
+	# applier needs it to find the object in a scene that still uses the old
+	# name.
+	previous_name:        Optional[str]                = None
 
 	@property
 	def has_conflicts(self) -> bool:
 		return bool(self.conflicts)
 
 	@property
+	def applicable_conflicts(self) -> list[PropertyConflict]:
+		"""Conflicts whose resolution BlenDiff can actually write back."""
+		return [c for c in self.conflicts if c.applicable]
+
+	@property
+	def informational_conflicts(self) -> list[PropertyConflict]:
+		"""
+		Conflicts BlenDiff can detect but not apply.
+
+		Shown so the user knows the two versions disagree, and knows they must
+		reconcile it by hand.
+		"""
+		return [c for c in self.conflicts if not c.applicable]
+
+	@property
 	def all_resolved(self) -> bool:
-		"""True when every conflict has a resolution set."""
-		return all(c.is_resolved for c in self.conflicts)
+		"""
+		True when every *applicable* conflict has a resolution set.
+
+		Conflicts BlenDiff cannot write back deliberately do not block the
+		merge. Requiring a resolution for them would ask the user to choose
+		between two values, then discard the choice — and would hold up the
+		applicable changes for no benefit. They are surfaced as informational
+		instead, so the user knows to reconcile them by hand.
+		"""
+		return all(c.is_resolved for c in self.applicable_conflicts)
+
+	@property
+	def has_unapplicable_changes(self) -> bool:
+		"""True when this proposal contains anything BlenDiff cannot write back."""
+		return bool(
+			self.informational_conflicts
+			or [c for c in self.non_conflicting_from_a if not c.applicable]
+			or [c for c in self.non_conflicting_from_b if not c.applicable]
+		)
 
 	@property
 	def conflict_count(self) -> int:
@@ -126,7 +195,8 @@ class MergeProposal:
 
 	@property
 	def unresolved_count(self) -> int:
-		return sum(1 for c in self.conflicts if not c.is_resolved)
+		"""Applicable conflicts still awaiting a decision."""
+		return sum(1 for c in self.applicable_conflicts if not c.is_resolved)
 
 	def resolve(self, property_path: str, resolution: Resolution) -> bool:
 		"""
@@ -140,8 +210,13 @@ class MergeProposal:
 		return False
 
 	def resolve_all(self, resolution: Resolution) -> None:
-		"""Apply the same resolution to every unresolved conflict."""
-		for conflict in self.conflicts:
+		"""
+		Apply the same resolution to every unresolved, applicable conflict.
+
+		Unapplicable conflicts are left alone: marking them resolved would
+		imply the merge will act on them.
+		"""
+		for conflict in self.applicable_conflicts:
 			if not conflict.is_resolved:
 				conflict.resolution = resolution
 
@@ -181,6 +256,28 @@ class ThreeWayDiff:
 		return sum(p.conflict_count for p in self.proposals)
 
 	@property
+	def object_proposals(self) -> list[MergeProposal]:
+		return [p for p in self.proposals if p.target_kind == TargetKind.OBJECT]
+
+	@property
+	def collection_proposals(self) -> list[MergeProposal]:
+		return [p for p in self.proposals if p.target_kind == TargetKind.COLLECTION]
+
+	@property
+	def scene_proposals(self) -> list[MergeProposal]:
+		return [p for p in self.proposals if p.target_kind == TargetKind.SCENE]
+
+	@property
+	def unapplicable_conflicts(self) -> int:
+		"""
+		Conflicts BlenDiff can report but not apply.
+
+		Surfaced in the summary so "ready to apply" is never read as "every
+		difference will be reconciled".
+		"""
+		return sum(len(p.informational_conflicts) for p in self.proposals)
+
+	@property
 	def unresolved_conflicts(self) -> int:
 		return sum(p.unresolved_count for p in self.proposals)
 
@@ -192,5 +289,6 @@ class ThreeWayDiff:
 			"total_conflicts":    self.total_conflicts,
 			"unresolved":         self.unresolved_conflicts,
 			"auto_resolved":      self.auto_resolved_count,
+			"unapplicable":       self.unapplicable_conflicts,
 			"ready_to_apply":     self.all_resolved,
 		}

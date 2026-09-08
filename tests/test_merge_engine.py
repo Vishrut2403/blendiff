@@ -430,3 +430,33 @@ class TestMultipleObjects:
 		# Resolve the second
 		tw.proposals[1].resolve_all(Resolution.USE_B)
 		assert tw.all_resolved
+
+
+class TestAutoResolvedValue:
+	"""
+	AUTO means both sides made the identical change, so the resolved value is
+	that change. Returning the common ancestor's value instead would silently
+	revert an edit both artists had made.
+	"""
+
+	def _conflict(self):
+		return PropertyConflict(
+			property_path="transform.location",
+			base_value=[0.0, 0.0, 0.0],
+			value_a=[7.0, 0.0, 0.0],
+			value_b=[7.0, 0.0, 0.0],
+			kind=ConflictKind.BOTH_MODIFIED,
+			resolution=Resolution.AUTO,
+		)
+
+	def test_auto_resolves_to_the_agreed_value(self):
+		assert self._conflict().resolved_value == [7.0, 0.0, 0.0]
+
+	def test_auto_does_not_resolve_to_base(self):
+		conflict = self._conflict()
+		assert conflict.resolved_value != conflict.base_value
+
+	def test_use_base_still_returns_base(self):
+		conflict = self._conflict()
+		conflict.resolution = Resolution.USE_BASE
+		assert conflict.resolved_value == [0.0, 0.0, 0.0]
