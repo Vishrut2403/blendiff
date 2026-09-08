@@ -9,11 +9,15 @@ import json
 import os
 import tempfile
 import pytest
+from unittest.mock import patch
 
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from blendiff.storage.sidecar import SidecarManager, Snapshot, SIDECAR_EXTENSION
+from blendiff.storage.sidecar import (
+	SidecarManager, Snapshot, SIDECAR_EXTENSION, SIDECAR_VERSION,
+)
+from blendiff.data_model.schema import SCHEMA_VERSION
 
 
 # Fixtures
@@ -124,7 +128,7 @@ class TestSaveSnapshot:
 		with open(sidecar_path) as f:
 			data = json.load(f)
 		assert "snapshots" in data
-		assert data["blendiff_version"] == "0.1"
+		assert data["blendiff_version"] == SIDECAR_VERSION
 
 
 # get_snapshot
@@ -225,7 +229,26 @@ class TestSnapshotDataclass:
 		assert restored.id == snap.id
 		assert restored.label == snap.label
 		assert restored.scene_name == snap.scene_name
+
+	def test_roundtrip_preserves_scene_content(self):
+		"""
+		Loading migrates the scene forward, so data is not byte-identical —
+		but every field the snapshot actually stored survives untouched.
+		"""
+		snap = Snapshot.create("Test", "Scene", MOCK_SCENE)
+		restored = Snapshot.from_dict(snap.to_dict())
+		for key, value in MOCK_SCENE.items():
+			assert restored.data[key] == value
+
+	def test_roundtrip_without_migration_is_identical(self):
+		snap = Snapshot.create("Test", "Scene", MOCK_SCENE)
+		restored = Snapshot.from_dict(snap.to_dict(), migrate=False)
 		assert restored.data == snap.data
+
+	def test_load_migrates_legacy_scene_data(self):
+		snap = Snapshot.create("Test", "Scene", MOCK_SCENE)
+		restored = Snapshot.from_dict(snap.to_dict())
+		assert restored.schema_version == SCHEMA_VERSION
 
 	def test_timestamp_display_is_string(self):
 		snap = Snapshot.create("Test", "Scene", MOCK_SCENE)
@@ -254,3 +277,97 @@ class TestCorruptedSidecar:
 		mgr = SidecarManager(blend_file)
 		snap = mgr.save_snapshot("Recovery", "Scene", MOCK_SCENE)
 		assert snap.label == "Recovery"
+
+# Atomic writes
+
+class TestAtomicWrite:
+	"""
+	The sidecar holds the user's entire snapshot history, so a partial write
+	must never be observable. These tests assert the write is all-or-nothing.
+	"""
+
+	def test_failed_write_leaves_original_intact(self, mgr, blend_file):
+		mgr.save_snapshot("Good", "Scene", MOCK_SCENE)
+		sidecar_path = blend_file.replace(".blend", SIDECAR_EXTENSION)
+		with open(sidecar_path) as f:
+			before = f.read()
+
+		# Fail midway through serialising the replacement payload.
+		with patch("json.dump", side_effect=OSError("disk full")):
+			with pytest.raises(OSError):
+				mgr.save_snapshot("Bad", "Scene", MOCK_SCENE)
+
+		with open(sidecar_path) as f:
+			after = f.read()
+		assert after == before
+
+	def test_failed_write_leaves_no_temp_files(self, mgr, blend_file):
+		mgr.save_snapshot("Good", "Scene", MOCK_SCENE)
+		directory = os.path.dirname(os.path.abspath(blend_file))
+
+		with patch("json.dump", side_effect=OSError("disk full")):
+			with pytest.raises(OSError):
+				mgr.save_snapshot("Bad", "Scene", MOCK_SCENE)
+
+		leftovers = [f for f in os.listdir(directory) if f.startswith(".blendiff-")]
+		assert leftovers == []
+
+	def test_history_survives_failed_write(self, mgr):
+		mgr.save_snapshot("First", "Scene", MOCK_SCENE)
+		mgr.save_snapshot("Second", "Scene", MOCK_SCENE)
+
+		with patch("json.dump", side_effect=OSError("disk full")):
+			with pytest.raises(OSError):
+				mgr.save_snapshot("Third", "Scene", MOCK_SCENE)
+
+		labels = {s.label for s in mgr.list_snapshots()}
+		assert labels == {"First", "Second"}
+
+	def test_write_upgrades_stored_sidecar_version(self, mgr, blend_file):
+		mgr.save_snapshot("Test", "Scene", MOCK_SCENE)
+		sidecar_path = blend_file.replace(".blend", SIDECAR_EXTENSION)
+		with open(sidecar_path) as f:
+			assert json.load(f)["blendiff_version"] == SIDECAR_VERSION
+
+
+# Schema migration through the manager
+
+class TestSidecarMigration:
+	def test_outdated_snapshots_are_reported(self, mgr, blend_file):
+		mgr.save_snapshot("Legacy", "Scene", MOCK_SCENE)
+		_downgrade_stored_snapshots(blend_file)
+		assert len(mgr.outdated_snapshot_ids()) == 1
+
+	def test_migrate_file_upgrades_snapshots(self, mgr, blend_file):
+		mgr.save_snapshot("Legacy", "Scene", MOCK_SCENE)
+		_downgrade_stored_snapshots(blend_file)
+
+		assert mgr.migrate_file() == 1
+		assert mgr.outdated_snapshot_ids() == []
+
+	def test_migrate_file_is_idempotent(self, mgr, blend_file):
+		mgr.save_snapshot("Legacy", "Scene", MOCK_SCENE)
+		_downgrade_stored_snapshots(blend_file)
+
+		mgr.migrate_file()
+		assert mgr.migrate_file() == 0
+
+	def test_snapshots_load_migrated(self, mgr, blend_file):
+		mgr.save_snapshot("Legacy", "Scene", MOCK_SCENE)
+		_downgrade_stored_snapshots(blend_file)
+
+		snap = mgr.list_snapshots()[0]
+		assert snap.schema_version == SCHEMA_VERSION
+
+
+def _downgrade_stored_snapshots(blend_file):
+	"""Strip schema markers from the file, simulating a pre-0.6 sidecar."""
+	sidecar_path = blend_file.replace(".blend", SIDECAR_EXTENSION)
+	with open(sidecar_path) as f:
+		data = json.load(f)
+	for snap in data["snapshots"]:
+		snap["data"].pop("schema_version", None)
+		snap["data"].pop("captured_domains", None)
+		snap["data"].pop("transform_space", None)
+	with open(sidecar_path, "w") as f:
+		json.dump(data, f)

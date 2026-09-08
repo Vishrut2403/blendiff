@@ -1,20 +1,40 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
+import tempfile
 import uuid
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from typing import Optional
 
-SIDECAR_VERSION = "0.1"
+from .migrate import migrate_scene, needs_migration
+
+log = logging.getLogger(__name__)
+
+SIDECAR_VERSION = "0.2"
 SIDECAR_EXTENSION = ".blendiff"
+
+# Sidecar files written by these versions are readable by the current loader.
+SUPPORTED_SIDECAR_VERSIONS = ("0.1", "0.2")
 
 
 # Git helper
 
 def _get_git_hash(cwd: Optional[str] = None) -> Optional[str]:
+	"""
+	Return the short HEAD hash of the repository containing ``cwd``.
+
+	``cwd`` must be a real directory. There is deliberately no fallback to the
+	process working directory: Blender's cwd is wherever it happened to be
+	launched from, so falling back would stamp snapshots with the hash of a
+	completely unrelated repository — silently wrong provenance, which is worse
+	than no provenance at all.
+	"""
+	if not cwd or not os.path.isdir(cwd):
+		return None
 
 	try:
 		result = subprocess.run(
@@ -63,15 +83,32 @@ class Snapshot:
 				return asdict(self)
 
 		@staticmethod
-		def from_dict(d: dict) -> "Snapshot":
+		def from_dict(d: dict, migrate: bool = True) -> "Snapshot":
+				"""
+				Rebuild a Snapshot from its stored dict.
+
+				Scene data is migrated to the current schema on the way in, so
+				nothing downstream ever has to reason about historical snapshot
+				shapes. Migration is in-memory only; the file is untouched until
+				SidecarManager.migrate_file is called explicitly.
+				"""
+				data = d["data"]
+				if migrate:
+						data = migrate_scene(data)
 				return Snapshot(
 						id=d["id"],
 						label=d["label"],
 						timestamp=d["timestamp"],
 						scene_name=d["scene_name"],
-						data=d["data"],
+						data=data,
 						git_hash=d.get("git_hash"),
 				)
+
+		@property
+		def schema_version(self) -> int:
+				"""Schema version of this snapshot's scene data."""
+				from ..data_model.schema import schema_version_of
+				return schema_version_of(self.data)
 
 		def timestamp_display(self) -> str:
 				try:
@@ -143,8 +180,10 @@ class SidecarManager:
 
 				self._require_available()
 
-				blend_dir = os.path.dirname(self._blend_filepath) or None
-				git_hash = _get_git_hash(cwd=blend_dir) or _get_git_hash(cwd=None)
+				# Only the .blend file's own directory is consulted — see
+				# _get_git_hash for why there is no process-cwd fallback.
+				blend_dir = os.path.dirname(os.path.abspath(self._blend_filepath))
+				git_hash = _get_git_hash(cwd=blend_dir)
 
 				snap = Snapshot.create(
 						label=label,
@@ -196,6 +235,43 @@ class SidecarManager:
 				data = self._load_raw()
 				return len(data.get("snapshots", []))
 
+		def outdated_snapshot_ids(self) -> list[str]:
+				"""
+				IDs of snapshots stored in a pre-current schema version.
+
+				These still diff correctly — they are migrated on read — but
+				domains they never captured are reported as skipped rather than
+				as changes.
+				"""
+				data = self._load_raw()
+				return [
+						s["id"] for s in data.get("snapshots", [])
+						if needs_migration(s.get("data", {}))
+				]
+
+		def migrate_file(self) -> int:
+				"""
+				Rewrite the sidecar with every snapshot migrated to the current
+				schema, and return how many were upgraded.
+
+				This is opt-in: until it is called, the file stays readable by
+				older BlenDiff versions. The write is atomic, so an interrupted
+				migration leaves the original file intact.
+				"""
+				self._require_available()
+
+				data = self._load_raw()
+				upgraded = 0
+				for snap in data.get("snapshots", []):
+						scene = snap.get("data", {})
+						if needs_migration(scene):
+								snap["data"] = migrate_scene(scene)
+								upgraded += 1
+
+				if upgraded:
+						self._write_raw(data)
+				return upgraded
+
 
 		# Internal helpers
 
@@ -223,9 +299,38 @@ class SidecarManager:
 						return _empty_sidecar(blend_filename)
 
 		def _write_raw(self, data: dict) -> None:
-				"""Write the sidecar dict to disk as pretty-printed JSON."""
-				with open(self._sidecar_path, "w", encoding="utf-8") as f:
-						json.dump(data, f, indent=2, ensure_ascii=False)
+				"""
+				Write the sidecar atomically.
+
+				The sidecar holds the user's entire version history, so it must
+				never be left truncated. Writing in place means a crash, a full
+				disk, or a killed Blender process during the write destroys
+				every snapshot. Instead the payload goes to a temporary file in
+				the same directory (same filesystem, so the rename is atomic),
+				is flushed all the way to disk, and only then replaces the real
+				file via os.replace — which is atomic on POSIX and Windows.
+				"""
+				data["blendiff_version"] = SIDECAR_VERSION
+
+				directory = os.path.dirname(os.path.abspath(self._sidecar_path))
+				os.makedirs(directory, exist_ok=True)
+
+				fd, tmp_path = tempfile.mkstemp(
+						prefix=".blendiff-", suffix=".tmp", dir=directory,
+				)
+				try:
+						with os.fdopen(fd, "w", encoding="utf-8") as f:
+								json.dump(data, f, indent=2, ensure_ascii=False)
+								f.flush()
+								os.fsync(f.fileno())
+						os.replace(tmp_path, self._sidecar_path)
+				except Exception:
+						# Leave the existing sidecar untouched and clean up.
+						try:
+								os.unlink(tmp_path)
+						except OSError:
+								pass
+						raise
 
 		def _require_available(self) -> None:
 				if not self.is_available:
