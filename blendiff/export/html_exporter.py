@@ -28,8 +28,35 @@ def generate_html(
 	fcurve_diffs       = result.get("fcurve_diffs", [])
 	driver_diffs 	= result.get("driver_diffs", [])
 	nla_diffs 		= result.get("nla_diffs", [])
+	scene_custom_props = result.get("scene_custom_props", [])
+	renamed         = result.get("renamed_objects", [])
+	skip_notes      = result.get("skip_notes", [])
 
 	body_parts: list[str] = []
+
+	# Domains only one snapshot captured.
+	#
+	# This goes first, before any results. A report that silently omits a
+	# domain reads as "nothing changed there", which is a different and much
+	# more misleading statement than "this was not compared".
+	if skip_notes:
+		body_parts.append(_section_header("Not Compared", "skipped", len(skip_notes)))
+		body_parts.append(_notice_card(skip_notes))
+
+	# Renamed objects
+	#
+	# Called out separately because a rename is the change most likely to be
+	# misread — before identity tracking it appeared as an unrelated deletion
+	# plus addition, with every other change on the object lost.
+	if renamed:
+		body_parts.append(_section_header("Renamed Objects", "renamed", len(renamed)))
+		for entry in renamed:
+			body_parts.append(_entry_card(
+				entry_id=_safe_id(f"renamed_{entry['name']}"),
+				kind="renamed",
+				title=f"{entry['previous_name']} \u2192 {entry['name']}",
+				rows=[],
+			))
 
 	# Added objects
 	if added:
@@ -59,7 +86,9 @@ def generate_html(
 			]
 			body_parts.append(_entry_card(
 				entry_id=_safe_id(f"modified_{obj['name']}"),
-				kind="modified", title=f"~ {obj['name']}", rows=rows,
+				kind="modified",
+				title=f"~ {obj.get('display_name') or obj['name']}",
+				rows=rows,
 			))
 
 	# Collection diffs
@@ -178,6 +207,18 @@ def generate_html(
 				entry_id=_safe_id(f"nla_{nd['object_name']}"),
 				kind="nla", title=f"~ {nd['object_name']}", rows=rows,
 			))
+	
+	# Scene Custom Properties
+	if scene_custom_props:
+		body_parts.append(_section_header("Scene Custom Properties", "sceneprop", len(scene_custom_props)))
+		rows = [
+			_change_row(c["property_path"], c["old_value"], c["new_value"])
+			for c in scene_custom_props
+		]
+		body_parts.append(_entry_card(
+			entry_id="scene_custom_props",
+			kind="sceneprop", title="~ Scene", rows=rows,
+		))
 
 	if not body_parts:
 		body_parts.append(
@@ -248,6 +289,21 @@ def _entry_card(entry_id: str, kind: str, title: str, rows: list[str]) -> str:
 	  placeholder="Add a note about this change…"
 	  oninput="saveAnnotation(this)"
 	></textarea>
+  </div>
+</div>"""
+
+
+def _notice_card(messages: list[str]) -> str:
+	"""A non-annotatable card for report-level notices."""
+	items = "\n".join(
+		f'  <div class="change-row"><span class="prop-path">{_esc(m)}</span></div>'
+		for m in messages
+	)
+	return f"""
+<div class="card skipped" id="card-not-compared">
+  <div class="card-title">Domains not compared</div>
+  <div class="changes">
+{items}
   </div>
 </div>"""
 
@@ -388,6 +444,9 @@ def _wrap_document(
   .section-header.fcurve      {{ color: #80cbc4; }}
   .section-header.driver      {{ color: #ffe082; }}
   .section-header.nla         {{ color: #80cbc4; }}
+  .section-header.sceneprop   {{ color: #a5d6a7; }}
+  .section-header.renamed     {{ color: #90caf9; }}
+  .section-header.skipped     {{ color: #9e9e9e; }}
 
   /* ── Cards ── */
   .card {{
@@ -404,11 +463,14 @@ def _wrap_document(
   .card.render      {{ border-left-color: #ce93d8; }}
   .card.world       {{ border-left-color: #80deea; }}
   .card.parent      {{ border-left-color: #ffcc80; }}
+  .card.renamed     {{ border-left-color: #90caf9; }}
+  .card.skipped     {{ border-left-color: #9e9e9e; }}
   .card.constraint  {{ border-left-color: #ef9a9a; }}
   .card.customprop  {{ border-left-color: #b39ddb; }}
   .card.fcurve      {{ border-left-color: #80cbc4; }}
   .card.driver      {{ border-left-color: #ffe082; }}
   .card.nla         {{ border-left-color: #80cbc4; }}
+  .card.sceneprop   {{ border-left-color: #a5d6a7; }}
 
   .card-title {{
 	font-weight: 600;

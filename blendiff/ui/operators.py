@@ -6,17 +6,27 @@ from ..serializer.scene_serializer import SceneSerializer
 from ..diff_engine.diff_engine import DiffEngine
 from ..data_model.scene import SerializedScene
 from ..storage.sidecar import SidecarManager
-from ..data_model.conflict import Resolution
 from ..merge_engine.merge_engine import MergeEngine
+from ..export.diff_result import diff_to_dict
 
 
 # Helpers
 
-def _extract_current_scene(context) -> tuple[dict, str]:
+def _extract_current_scene(
+	context,
+	stamp_identity: bool = False,
+) -> tuple[dict, str]:
+	"""
+	Serialise the current scene.
 
+	``stamp_identity`` writes a persistent BlenDiff id to objects that lack
+	one, so renames stay traceable across snapshots. It marks the .blend as
+	modified, so only snapshot capture — which the user explicitly asked for —
+	enables it; running a diff must never dirty the file.
+	"""
 	extractor = SceneExtractor()
 	serializer = SceneSerializer()
-	raw = extractor.extract(context)
+	raw = extractor.extract(context, stamp_identity=stamp_identity)
 	scene: SerializedScene = serializer.serialize(raw)
 	return scene, context.scene.name
 
@@ -26,164 +36,18 @@ def _get_sidecar(context) -> SidecarManager:
 
 
 def _run_diff_against_dict(context, snapshot_dict: dict) -> dict:
+	"""
+	Diff a stored snapshot against the live scene and cache the result.
 
+	The dict is built by the shared converter, so the panel, the HTML report
+	and the CLI all describe the same diff. Extraction here never stamps
+	identities: running a diff must not modify the .blend.
+	"""
 	current_dict, _ = _extract_current_scene(context)
 
 	engine = DiffEngine()
 	diff = engine.compare(snapshot_dict, current_dict)
-
-	s = diff.summary()
-
-	_parts = "  ".join(
-		part for part in [
-			f"Added: {s['added']}"                    if s['added']                else "",
-			f"Removed: {s['removed']}"                if s['removed']              else "",
-			f"Modified: {s['modified']}"              if s['modified']             else "",
-			f"Collections: {s['collection_changes']}" if s['collection_changes']   else "",
-			f"Parents: {s['parent_changes']}"         if s['parent_changes']       else "",
-			f"Constraints: {s['constraint_changes']}" if s['constraint_changes']   else "",
-			f"Custom Props: {s['custom_prop_changes']}" if s['custom_prop_changes'] else "",
-			f"F-Curves: {s['fcurve_changes']}"        if s['fcurve_changes']       else "",
-			f"Drivers: {s['driver_changes']}"         if s['driver_changes']       else "",
-			f"NLA: {s['nla_changes']}"                if s['nla_changes']          else "",
-		]
-		if part
-	)
-
-	result = {
-		"summary": _parts if _parts else "No changes detected",
-		"added_objects": [o.name for o in diff.added_objects],
-		"removed_objects": [o.name for o in diff.removed_objects],
-		"modified_objects": [
-			{
-				"name": o.name,
-				"changes": [
-					{
-						"property_path": c.property_path,
-						"old_value": c.old_value,
-						"new_value": c.new_value,
-					}
-					for c in o.changes
-				],
-			}
-			for o in diff.modified_objects
-		],
-		"collection_diffs": [
-			{
-				"path": cd.path,
-				"kind": cd.kind.value,
-				"changes": [
-					{
-						"property_path": c.property_path,
-						"old_value": c.old_value,
-						"new_value": c.new_value,
-					}
-					for c in cd.changes
-				],
-			}
-			for cd in diff.collection_diffs
-		],
-		"render_changes": [
-			{
-				"property_path": c.property_path,
-				"old_value": c.old_value,
-				"new_value": c.new_value,
-			}
-			for c in diff.render_diff.changes
-		],
-		"world_changes": [
-			{
-				"property_path": c.property_path,
-				"old_value": c.old_value,
-				"new_value": c.new_value,
-			}
-			for c in diff.world_diff.changes
-		],
-		"parent_diffs": [
-			{
-				"object_name": pd.object_name,
-				"changes": [
-					{
-						"property_path": c.property_path,
-						"old_value": c.old_value,
-						"new_value": c.new_value,
-					}
-					for c in pd.changes
-				],
-			}
-			for pd in diff.parent_diffs
-		],
-		"constraint_diffs": [
-			{
-				"object_name": cd.object_name,
-				"changes": [
-					{
-						"property_path": c.property_path,
-						"old_value": c.old_value,
-						"new_value": c.new_value,
-					}
-					for c in cd.changes
-				],
-			}
-			for cd in diff.constraint_diffs
-		],
-		"custom_prop_diffs": [
-			{
-				"object_name": cpd.object_name,
-				"changes": [
-					{
-						"property_path": c.property_path,
-						"old_value": c.old_value,
-						"new_value": c.new_value,
-					}
-					for c in cpd.changes
-				],
-			}
-			for cpd in diff.custom_prop_diffs
-		],
-		"fcurve_diffs": [
-			{
-				"object_name": fd.object_name,
-				"changes": [
-					{
-						"property_path": c.property_path,
-						"old_value": c.old_value,
-						"new_value": c.new_value,
-					}
-					for c in fd.changes
-				],
-			}
-			for fd in diff.fcurve_diffs
-		],
-		"driver_diffs": [
-			{
-				"object_name": dd.object_name,
-				"changes": [
-					{
-						"property_path": c.property_path,
-						"old_value": c.old_value,
-						"new_value": c.new_value,
-					}
-					for c in dd.changes
-				],
-			}
-			for dd in diff.driver_diffs
-		],
-		"nla_diffs": [
-			{
-				"object_name": nd.object_name,
-				"changes": [
-					{
-						"property_path": c.property_path,
-						"old_value": c.old_value,
-						"new_value": c.new_value,
-					}
-					for c in nd.changes
-				],
-			}
-			for nd in diff.nla_diffs
-		],
-	}
+	result = diff_to_dict(diff)
 
 	context.window_manager["blendiff_result"] = json.dumps(result)
 	return result
@@ -279,7 +143,12 @@ class BLENDIFF_OT_SaveSnapshot(bpy.types.Operator):
 		label = self.label.strip() or f"Snapshot {mgr.snapshot_count() + 1}"
 
 		try:
-			scene_dict, scene_name = _extract_current_scene(context)
+			# Capture is the one moment BlenDiff may write to the .blend:
+			# stamping identities here is what lets later snapshots survive
+			# a rename.
+			scene_dict, scene_name = _extract_current_scene(
+				context, stamp_identity=True,
+			)
 			snap = mgr.save_snapshot(label, scene_name, scene_dict)
 			self.report({"INFO"}, f"BlenDiff: Saved snapshot '{snap.label}' ({snap.id[:8]})")
 			return {"FINISHED"}
@@ -484,20 +353,25 @@ class BLENDIFF_OT_SetResolution(bpy.types.Operator):
 							conflict["resolution"] = self.resolution
 							break
 
-			all_resolved = all(
-				all(
-					c.get("resolution", "unresolved") not in ("unresolved",)
-					for c in p.get("conflicts", [])
+			# Only applicable conflicts gate the merge. Conflicts BlenDiff
+			# cannot write back are informational: requiring a decision there
+			# would block the changes it *can* apply, in exchange for a choice
+			# that would then be discarded.
+			def _blocking(proposal):
+				return [
+					c for c in proposal.get("conflicts", [])
+					if c.get("applicable", True)
+				]
+
+			unresolved = sum(
+				sum(
+					1 for c in _blocking(p)
+					if c.get("resolution", "unresolved") == "unresolved"
 				)
 				for p in result.get("proposals", [])
 			)
-			result["summary"]["ready_to_apply"] = all_resolved
-			unresolved = sum(
-				sum(1 for c in p.get("conflicts", [])
-					if c.get("resolution", "unresolved") == "unresolved")
-				for p in result.get("proposals", [])
-			)
 			result["summary"]["unresolved"] = unresolved
+			result["summary"]["ready_to_apply"] = unresolved == 0
 
 			wm["blendiff_threeway_result"] = json.dumps(result)
 			return {"FINISHED"}
@@ -529,10 +403,6 @@ class BLENDIFF_OT_ApplyMerge(bpy.types.Operator):
 
 		try:
 			from ..merge_engine.applier import Applier
-			from ..data_model.conflict import (
-				ThreeWayDiff, MergeProposal, PropertyConflict,
-				NonConflictingChange, Resolution, ConflictKind,
-			)
 
 			tw = _deserialize_threeway(result)
 			applier = Applier()
@@ -541,11 +411,16 @@ class BLENDIFF_OT_ApplyMerge(bpy.types.Operator):
 			if "blendiff_threeway_result" in wm:
 				del wm["blendiff_threeway_result"]
 
-			self.report(
-				{"INFO"},
-				f"BlenDiff: Applied {apply_result.succeeded} proposal(s). "
-				f"Failed: {apply_result.failed}."
-			)
+			# Report per property, not per proposal. Counting proposals made a
+			# merge that wrote nothing look like a success.
+			level = "WARNING" if (apply_result.failed or apply_result.skipped) else "INFO"
+			self.report({level}, f"BlenDiff: {apply_result.report_line()}")
+
+			for outcome in apply_result.failed[:5]:
+				self.report({"ERROR"}, f"BlenDiff: {outcome}")
+			for outcome in apply_result.skipped[:5]:
+				self.report({"WARNING"}, f"BlenDiff: {outcome}")
+
 			return {"FINISHED"}
 		except Exception as e:
 			self.report({"ERROR"}, f"BlenDiff: {e}")
@@ -565,6 +440,8 @@ def _serialize_threeway(tw) -> dict:
 			{
 				"object_name": p.object_name,
 				"structural_conflict": p.structural_conflict,
+				"target_kind": p.target_kind.value,
+				"previous_name": p.previous_name,
 				"conflicts": [
 					{
 						"property_path": c.property_path,
@@ -573,6 +450,8 @@ def _serialize_threeway(tw) -> dict:
 						"value_b":       c.value_b,
 						"kind":          c.kind.value,
 						"resolution":    c.resolution.value,
+						"applicable":    c.applicable,
+						"unsupported_reason": c.unsupported_reason,
 					}
 					for c in p.conflicts
 				],
@@ -580,14 +459,18 @@ def _serialize_threeway(tw) -> dict:
 					{"property_path": nc.property_path,
 					 "base_value": nc.base_value,
 					 "new_value": nc.new_value,
-					 "source": nc.source}
+					 "source": nc.source,
+					 "applicable": nc.applicable,
+					 "unsupported_reason": nc.unsupported_reason}
 					for nc in p.non_conflicting_from_a
 				],
 				"non_conflicting_from_b": [
 					{"property_path": nc.property_path,
 					 "base_value": nc.base_value,
 					 "new_value": nc.new_value,
-					 "source": nc.source}
+					 "source": nc.source,
+					 "applicable": nc.applicable,
+					 "unsupported_reason": nc.unsupported_reason}
 					for nc in p.non_conflicting_from_b
 				],
 			}
@@ -600,7 +483,7 @@ def _deserialize_threeway(d: dict):
 	"""Reconstruct a ThreeWayDiff from a JSON dict."""
 	from ..data_model.conflict import (
 		ThreeWayDiff, MergeProposal, PropertyConflict,
-		NonConflictingChange, Resolution, ConflictKind,
+		NonConflictingChange, Resolution, ConflictKind, TargetKind,
 	)
 
 	proposals = []
@@ -613,6 +496,8 @@ def _deserialize_threeway(d: dict):
 				value_b=c["value_b"],
 				kind=ConflictKind(c["kind"]),
 				resolution=Resolution(c["resolution"]),
+				applicable=c.get("applicable", True),
+				unsupported_reason=c.get("unsupported_reason", ""),
 			)
 			for c in pd.get("conflicts", [])
 		]
@@ -630,6 +515,8 @@ def _deserialize_threeway(d: dict):
 			non_conflicting_from_a=nc_a,
 			non_conflicting_from_b=nc_b,
 			structural_conflict=pd.get("structural_conflict", False),
+			target_kind=TargetKind(pd.get("target_kind", "object")),
+			previous_name=pd.get("previous_name"),
 		))
 
 	tw = ThreeWayDiff(

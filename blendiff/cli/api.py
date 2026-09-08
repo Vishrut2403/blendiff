@@ -30,6 +30,7 @@ from typing import Optional
 
 from ..storage.sidecar import SidecarManager, Snapshot
 from ..diff_engine.diff_engine import DiffEngine
+from ..export.diff_result import diff_to_dict
 
 
 # ---------------------------------------------------------------------------
@@ -226,56 +227,24 @@ def _find_by_label(snapshots: list[Snapshot], label: str) -> Optional[Snapshot]:
 
 
 def _run_diff(snap_a: Snapshot, snap_b: Snapshot) -> dict:
-	"""Run DiffEngine on two Snapshot objects and return a result dict."""
+	"""
+	Run DiffEngine on two Snapshot objects and return a result dict.
+
+	The conversion is shared with the Blender UI and the HTML exporter so the
+	CLI can never again report fewer domains than it actually diffed.
+	"""
 	engine = DiffEngine()
 	diff = engine.compare(snap_a.data, snap_b.data)
-	s = diff.summary()
 
-	return {
-		"summary": (
-			f"Added: {s['added']}  Removed: {s['removed']}  "
-			f"Modified: {s['modified']}  Collections: {s['collection_changes']}"
-		),
-		"has_changes": diff.has_changes,
-		"added_objects": [o.name for o in diff.added_objects],
-		"removed_objects": [o.name for o in diff.removed_objects],
-		"modified_objects": [
-			{
-				"name": o.name,
-				"changes": [
-					{
-						"property_path": c.property_path,
-						"old_value": c.old_value,
-						"new_value": c.new_value,
-					}
-					for c in o.changes
-				],
-			}
-			for o in diff.modified_objects
-		],
-		"collection_diffs": [
-			{
-				"path": cd.path,
-				"kind": cd.kind.value,
-				"changes": [
-					{
-						"property_path": c.property_path,
-						"old_value": c.old_value,
-						"new_value": c.new_value,
-					}
-					for c in cd.changes
-				],
-			}
-			for cd in diff.collection_diffs
-		],
-		"snapshot_a": {
-			"id": snap_a.id,
-			"label": snap_a.label,
-			"timestamp": snap_a.timestamp_display(),
-		},
-		"snapshot_b": {
-			"id": snap_b.id,
-			"label": snap_b.label,
-			"timestamp": snap_b.timestamp_display(),
-		},
+	result = diff_to_dict(diff)
+	result["snapshot_a"] = {
+		"id": snap_a.id,
+		"label": snap_a.label,
+		"timestamp": snap_a.timestamp_display(),
 	}
+	result["snapshot_b"] = {
+		"id": snap_b.id,
+		"label": snap_b.label,
+		"timestamp": snap_b.timestamp_display(),
+	}
+	return result

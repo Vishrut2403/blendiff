@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 
 
@@ -108,7 +107,7 @@ def _cmd_list(args) -> int:
 
 def _cmd_compare(args, use_latest: bool = False) -> int:
 	from .api import compare_snapshots_by_label, compare_latest_two
-	from ..export.html_exporter import export_to_file, build_output_path
+	from ..export.html_exporter import export_to_file
 
 	quiet = getattr(args, "quiet", False)
 
@@ -150,7 +149,7 @@ def _cmd_compare(args, use_latest: bool = False) -> int:
 		if not quiet:
 			snap_a = result["snapshot_a"]
 			snap_b = result["snapshot_b"]
-			print(f"\nBlenDiff — comparing snapshots")
+			print("\nBlenDiff — comparing snapshots")
 			print(f"  Before : '{snap_a['label']}' ({snap_a['timestamp']})")
 			print(f"  After  : '{snap_b['label']}' ({snap_b['timestamp']})")
 			print(f"\n  {result['summary']}\n")

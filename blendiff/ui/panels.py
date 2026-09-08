@@ -31,7 +31,6 @@ class BLENDIFF_PT_Main(bpy.types.Panel):
 
 	def draw(self, context):
 		layout = self.layout
-		wm = context.window_manager
 
 		# In-memory snapshot workflow
 		layout.label(text="Quick Diff (in-memory)", icon="CAMERA_DATA")
@@ -139,7 +138,29 @@ class BLENDIFF_PT_Results(bpy.types.Panel):
 
 		layout.operator("blendiff.export_html", icon="EXPORT")
 		layout.label(text=diff.get("summary", ""), icon="INFO")
+
+		# Domains only one of the two snapshots captured. Shown before the
+		# results so an incomplete comparison is never mistaken for a clean one.
+		skip_notes = diff.get("skip_notes", [])
+		if skip_notes:
+			box = layout.box()
+			box.label(text=f"Not compared ({len(skip_notes)})", icon="INFO")
+			for note in skip_notes:
+				sub = box.column()
+				sub.scale_y = 0.8
+				for line in _wrap(note, 44):
+					sub.label(text=f"  {line}")
+
 		layout.separator()
+
+		# Renamed Objects — listed separately because a rename is the change
+		# most likely to be misread as an unrelated delete plus add.
+		renamed = diff.get("renamed_objects", [])
+		if renamed:
+			box = layout.box()
+			box.label(text=f"Renamed ({len(renamed)})", icon="SORTALPHA")
+			for entry in renamed:
+				box.label(text=f"  {entry['previous_name']} \u2192 {entry['name']}")
 
 		# Added Objects
 		added = diff.get("added_objects", [])
@@ -163,7 +184,7 @@ class BLENDIFF_PT_Results(bpy.types.Panel):
 			box = layout.box()
 			box.label(text=f"Modified ({len(modified)})", icon="MODIFIER")
 			for obj in modified:
-				box.label(text=f"  ~ {obj['name']}")
+				box.label(text=f"  ~ {obj.get('display_name') or obj['name']}")
 				for change in obj.get("changes", []):
 					sub = box.column()
 					sub.scale_y = 0.8
@@ -303,7 +324,36 @@ class BLENDIFF_PT_Results(bpy.types.Panel):
 						text=f"        {_format_value(change['old_value'])}  →  {_format_value(change['new_value'])}"
 				)
 
+		#Scene Custom Properties
+		scene_custom_props = diff.get("scene_custom_props", [])
+		if scene_custom_props:
+			box = layout.box()
+			box.label(text=f"Scene Custom Properties ({len(scene_custom_props)})", icon="SCENE_DATA")
+			for change in scene_custom_props:
+				sub = box.column()
+				sub.scale_y = 0.8
+				sub.label(text=f"      {change['property_path']}")
+				sub.label(text=f"        {_format_value(change['old_value'])}  →  {_format_value(change['new_value'])}"
+				)
+
 # Value formatting helper  (fixes the material slot dict display bug)
+
+def _wrap(text: str, width: int) -> list[str]:
+	"""Split a message into label-sized lines; Blender labels do not wrap."""
+	words = text.split()
+	lines: list[str] = []
+	current = ""
+	for word in words:
+		candidate = f"{current} {word}".strip()
+		if len(candidate) > width and current:
+			lines.append(current)
+			current = word
+		else:
+			current = candidate
+	if current:
+		lines.append(current)
+	return lines
+
 
 def _format_value(value) -> str:
 	
