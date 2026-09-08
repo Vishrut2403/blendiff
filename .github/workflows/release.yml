@@ -115,3 +115,90 @@ jobs:
 
       - name: Publish
         uses: pypa/gh-action-pypi-publish@release/v1
+
+  release-assets:
+    name: Attach addon zip to the GitHub release
+    needs: [publish]
+    runs-on: ubuntu-latest
+
+    permissions:
+      # Creating a release and uploading an asset are writes to the repository.
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The PyPI wheel deliberately excludes ui/ and extractor/, because they
+      # require bpy. This zip is therefore the only way to install the Blender
+      # addon, and shipping a release without it leaves addon users with
+      # nothing to download.
+      - name: Build addon zip
+        id: zip
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          ZIP="blendiff-${VERSION}.zip"
+
+          # git archive reads from the commit, so untracked files, build
+          # artifacts and __pycache__ cannot leak into the addon. The prefix
+          # gives the single top-level blendiff/ folder Blender expects.
+          git archive --format=zip --prefix=blendiff/ HEAD:blendiff -o "$ZIP"
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
+
+      - name: Verify zip layout
+        run: |
+          python - "${{ steps.zip.outputs.zip }}" <<'PY'
+          import sys, zipfile
+          names = zipfile.ZipFile(sys.argv[1]).namelist()
+          problems = []
+          if not all(n.startswith("blendiff/") for n in names):
+              problems.append("entries are not under a single blendiff/ folder")
+          if "blendiff/__init__.py" not in names:
+              problems.append("missing blendiff/__init__.py")
+          for required in ("/ui/", "/extractor/"):
+              if not any(required in n for n in names):
+                  problems.append(f"missing {required} — the addon would not run")
+          if any("__pycache__" in n for n in names):
+              problems.append("contains __pycache__")
+          if problems:
+              sys.exit("Bad addon zip: " + "; ".join(problems))
+          print(f"addon zip OK — {len(names)} entries")
+          PY
+
+      # Pull just this version's section out of the changelog, so the release
+      # notes match what shipped without anyone retyping them.
+      - name: Extract release notes
+        run: |
+          set -euo pipefail
+          awk -v ver="${{ steps.zip.outputs.version }}" '
+            $0 ~ "^## " ver "([^0-9]|$)" { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+
+          if [ ! -s release-notes.md ]; then
+            echo "No changelog section for ${{ steps.zip.outputs.version }}; using a placeholder."
+            echo "See CHANGELOG.md for details." > release-notes.md
+          fi
+
+      # Idempotent: the release may already exist if it was created by hand
+      # before the workflow ran, and re-running must not fail.
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          ZIP="${{ steps.zip.outputs.zip }}"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG exists — attaching the zip."
+            gh release upload "$TAG" "$ZIP" --clobber
+          else
+            echo "Creating release $TAG."
+            gh release create "$TAG" "$ZIP" \
+              --title "$TAG" \
+              --notes-file release-notes.md
+          fi

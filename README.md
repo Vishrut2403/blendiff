@@ -10,7 +10,7 @@ BlenDiff aims to be **honest about what it knows**: it will not report a change 
 
 ## Features
 
-- **Snapshot history** — named, timestamped snapshots stored in a human-readable `.blendiff` JSON sidecar next to your `.blend` file, written atomically so a crash can never truncate your history
+- **Snapshot history** — named, timestamped snapshots in a human-readable `.blendiff` JSON sidecar next to your `.blend` file, written atomically so a crash can never truncate your history, and content-addressed so a hundred snapshots of a mostly-unchanged scene cost a fraction of a hundred copies
 - **Rename tracking** — objects carry a persistent id, so renaming `Cube` to `Body_LOW` stays one modified object with all its other changes intact, instead of an unrelated delete plus add
 - **Object & collection diffing** — detects added, removed, renamed, and modified objects with per-property change tracking (local transform, viewport/render visibility, multi-collection membership)
 - **Material node graph diffing** — per-node, per-socket comparison including image names, input values, and rewired links
@@ -40,7 +40,7 @@ pip install blendiff
 
 ### As a Blender addon
 
-Download the latest `blendiff-0.7.0.zip` from [Releases](https://github.com/Vishrut2403/blendiff/releases) and install via **Edit → Preferences → Add-ons → Install**.
+Download the latest `blendiff-0.8.0.zip` from [Releases](https://github.com/Vishrut2403/blendiff/releases) and install via **Edit → Preferences → Add-ons → Install**.
 
 ---
 
@@ -159,7 +159,7 @@ pytest tests/ -v -m "not integration"
 pytest tests/ -v
 ```
 
-950+ unit tests run without Blender. A further 46 integration tests exercise the `extractor` package against a real Blender, and are skipped automatically when no Blender binary is found. Point `BLENDER_BINARY` at a specific build to test against a particular version:
+1000+ unit tests run without Blender. A further 46 integration tests exercise the `extractor` package against a real Blender, and are skipped automatically when no Blender binary is found. Point `BLENDER_BINARY` at a specific build to test against a particular version:
 
 ```bash
 BLENDER_BINARY=/opt/blender-4.2/blender pytest tests/integration -v
@@ -176,6 +176,17 @@ BLENDER_BINARY=/opt/blender-4.2/blender pytest tests/integration -v
 ```
 
 See `docs/ci_example.yml` for a diff-checking workflow template, and `.github/workflows/tests.yml` for the project's own CI — unit tests across Python 3.10–3.12, integration tests against Blender 4.2 and 5.1, and a check that the published wheel imports without Blender.
+
+## Releasing
+
+Releases are fully automated. Bump `__version__` in `blendiff/__init__.py`, update `CHANGELOG.md`, then push a tag:
+
+```bash
+git tag -a v0.9.0 -m "v0.9.0"
+git push origin v0.9.0
+```
+
+`.github/workflows/release.yml` then verifies the tag matches the package version, runs the tests, builds the distributions, publishes to PyPI via Trusted Publishing (no API token), and attaches the Blender addon zip to the GitHub release with notes taken from the changelog.
 
 ---
 
