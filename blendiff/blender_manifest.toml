@@ -1,20 +1,9 @@
-# Blender Extensions Platform manifest.
-#
-# This lives inside blendiff/ rather than at the repository root because an
-# extension zip has the manifest sitting alongside __init__.py — Blender
-# installs the zip's contents *as* the package (bl_ext.blender_org.blendiff),
-# so the manifest has to be part of the package directory.
-#
-# It coexists with bl_info in __init__.py: the manifest drives Blender 4.2+
-# extensions, while bl_info keeps the legacy addon zip installable on older
-# versions. tests/test_manifest.py asserts the two never disagree.
-
 schema_version = "1.0.0"
 
 id = "blendiff"
 name = "BlenDiff"
 tagline = "Semantic diff, snapshot history and merge for .blend files"
-version = "0.7.0"
+version = "0.8.0"
 type = "add-on"
 
 maintainer = "Vishrut Sachan <vishrutsachan2004@gmail.com>"

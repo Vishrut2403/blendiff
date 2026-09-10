@@ -31,7 +31,7 @@ pure-Python core installed from PyPI, and outside Blender entirely.
 # It was previously stated in three places — here, in bl_info, and in
 # pyproject.toml — which had drifted to 0.3.0 / 0.4.0 / 0.5.0 simultaneously.
 # bl_info now derives from this, and pyproject reads it directly.
-__version__ = "0.7.0"
+__version__ = "0.8.0"
 
 _version_tuple = tuple(int(part) for part in __version__.split("."))
 

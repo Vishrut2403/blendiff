@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.8.0 — 2026-09-10
 
 ### Added
 - **Armature and pose diffing.** Rigs were the largest blind spot: an ARMATURE
