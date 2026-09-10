@@ -128,10 +128,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install Blender
+        run: |
+          set -euo pipefail
+          VERSION="4.2.1"
+          URL="https://download.blender.org/release/Blender4.2/blender-${VERSION}-linux-x64.tar.xz"
+          mkdir -p "$HOME/blender"
+          curl -fsSL "$URL" | tar -xJ -C "$HOME/blender" --strip-components=1
+          echo "$HOME/blender" >> "$GITHUB_PATH"
+
       # The PyPI wheel deliberately excludes ui/ and extractor/, because they
       # require bpy. This zip is therefore the only way to install the Blender
       # addon, and shipping a release without it leaves addon users with
       # nothing to download.
+      # Blender 4.2+ installs extensions; older versions install the legacy
+      # addon zip. Both are published, since the manifest requires 4.2 while
+      # bl_info still supports 3.6.
+      - name: Build Blender extension
+        id: extension
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          mkdir -p ext-build
+          blender --command extension build \
+            --source-dir blendiff --output-dir ext-build
+          mv "ext-build/blendiff-${VERSION}.zip" "blendiff-${VERSION}-extension.zip"
+          echo "zip=blendiff-${VERSION}-extension.zip" >> "$GITHUB_OUTPUT"
+
       - name: Build addon zip
         id: zip
         run: |
@@ -193,12 +216,14 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           ZIP="${{ steps.zip.outputs.zip }}"
 
+          EXT="${{ steps.extension.outputs.zip }}"
+
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG exists — attaching the zip."
-            gh release upload "$TAG" "$ZIP" --clobber
+            echo "Release $TAG exists — attaching the zips."
+            gh release upload "$TAG" "$ZIP" "$EXT" --clobber
           else
             echo "Creating release $TAG."
-            gh release create "$TAG" "$ZIP" \
+            gh release create "$TAG" "$ZIP" "$EXT" \
               --title "$TAG" \
               --notes-file release-notes.md
           fi

@@ -1,0 +1,51 @@
+# Blender Extensions Platform manifest.
+#
+# This lives inside blendiff/ rather than at the repository root because an
+# extension zip has the manifest sitting alongside __init__.py — Blender
+# installs the zip's contents *as* the package (bl_ext.blender_org.blendiff),
+# so the manifest has to be part of the package directory.
+#
+# It coexists with bl_info in __init__.py: the manifest drives Blender 4.2+
+# extensions, while bl_info keeps the legacy addon zip installable on older
+# versions. tests/test_manifest.py asserts the two never disagree.
+
+schema_version = "1.0.0"
+
+id = "blendiff"
+name = "BlenDiff"
+tagline = "Semantic diff, snapshot history and merge for .blend files"
+version = "0.7.0"
+type = "add-on"
+
+maintainer = "Vishrut Sachan <vishrutsachan2004@gmail.com>"
+website = "https://github.com/Vishrut2403/blendiff"
+
+tags = ["Pipeline", "Development"]
+
+# Extensions are a Blender 4.2+ feature. Older versions install the legacy
+# addon zip from GitHub Releases instead, which is why bl_info still declares
+# a lower minimum.
+blender_version_min = "4.2.0"
+
+# The platform requires add-ons to be GPL-3.0-or-later: anything using the bpy
+# API is treated as a derivative of Blender, which is itself GPL.
+license = ["SPDX:GPL-3.0-or-later"]
+copyright = ["2026 Vishrut Sachan"]
+
+[permissions]
+# BlenDiff stores snapshot history in a .blendiff JSON sidecar next to the
+# .blend file, and writes HTML reports where the user asks. It reads and
+# writes nothing else, and needs no network access.
+files = "Read and write .blendiff snapshot files and HTML reports"
+
+[build]
+# Keep the shipped extension to just the add-on. Tests, caches and packaging
+# metadata are not useful to an artist and only inflate the download.
+paths_exclude_pattern = [
+  "__pycache__/",
+  "/.git/",
+  "*.pyc",
+  "/tests/",
+  "/docs/",
+  "*.blend1",
+]
