@@ -45,7 +45,7 @@ Edit → Preferences → **Get Extensions**, search for **BlenDiff**, click Inst
 
 ### As a Blender addon (Blender 3.6–4.1)
 
-Download the latest `blendiff-0.8.0.zip` from [Releases](https://github.com/Vishrut2403/blendiff/releases) and install via **Edit → Preferences → Add-ons → Install**.
+Download the latest `blendiff-<version>.zip` from [Releases](https://github.com/Vishrut2403/blendiff/releases) and install via **Edit → Preferences → Add-ons → Install from Disk**.
 
 ---
 

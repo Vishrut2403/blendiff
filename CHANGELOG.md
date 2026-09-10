@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.8.1 (2026-09-11)
 
 ### Fixed
 - **The extension build did not work when installed as an extension.** Six
