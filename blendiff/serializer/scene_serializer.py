@@ -3,6 +3,8 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from ..extractor.coerce import to_jsonable
+
 _FLOAT_PRECISION = 6
 
 
@@ -26,7 +28,7 @@ class SceneSerializer:
 			},
 			"render": self._serialize_render(raw.get("render", {})),
 			"world":  self._serialize_world(raw.get("world")),
-			"scene_custom_props": raw.get("scene_custom_props", {}),
+			"scene_custom_props": to_jsonable(raw.get("scene_custom_props", {})),
 		}
 
 		# Carry the extractor's schema stamp through untouched. Without it the
@@ -42,6 +44,20 @@ class SceneSerializer:
 		return result
 
 	def _serialize_object(self, obj: dict) -> dict:
+		"""
+		Normalise one object into JSON-safe data.
+
+		Several fields below are passed through from their extractors rather
+		than rebuilt here. That is deliberate for readability, but it means a
+		single leaky extractor could put a non-serializable value into the
+		snapshot, and json.dumps would then reject the *whole* file. That is
+		exactly what happened with an Array modifier's Vector offset: capture
+		raised TypeError and produced no snapshot at all.
+
+		The passed-through fields therefore go through to_jsonable as a safety
+		net. Fixing the extractor is still the right thing to do, but no single
+		extractor should be able to break snapshot capture for the whole scene.
+		"""
 		return {
 			"name":            obj["name"],
 			"blendiff_id":     obj.get("blendiff_id"),
@@ -63,18 +79,18 @@ class SceneSerializer:
 				None if obj.get("visible_in_viewlayer") is None
 				else bool(obj["visible_in_viewlayer"])
 			),
-			"camera_data":     obj.get("camera_data"),
+			"camera_data":     to_jsonable(obj.get("camera_data")),
 			"light_data":      obj.get("light_data"),
-			"mesh_data":       obj.get("mesh_data"),
-			"armature_data":   obj.get("armature_data"),
-			"pose_bones":      obj.get("pose_bones", {}),
-			"modifier_stack":  obj.get("modifier_stack", []),
+			"mesh_data":       to_jsonable(obj.get("mesh_data")),
+			"armature_data":   to_jsonable(obj.get("armature_data")),
+			"pose_bones":      to_jsonable(obj.get("pose_bones", {})),
+			"modifier_stack":  to_jsonable(obj.get("modifier_stack", [])),
 			"parent":           obj.get("parent"),
-			"constraint_stack": obj.get("constraint_stack", []),
-			"custom_props":     obj.get("custom_props", {}),
+			"constraint_stack": to_jsonable(obj.get("constraint_stack", [])),
+			"custom_props":     to_jsonable(obj.get("custom_props", {})),
 			"fcurves":          obj.get("fcurves", []),
 			"drivers":          obj.get("drivers", []),
-			"nla_tracks":       obj.get("nla_tracks", []),
+			"nla_tracks":       to_jsonable(obj.get("nla_tracks", [])),
 		}
 
 	def _serialize_transform(self, t: dict) -> dict:

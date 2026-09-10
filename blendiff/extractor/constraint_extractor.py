@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from .coerce import to_jsonable
+
 log = logging.getLogger(__name__)
 
 # Per-constraint-type properties to extract.
@@ -184,12 +186,9 @@ def _resolve(con: Any, bpy_attr: str, output_key: str) -> Any:
 	val = getattr(con, bpy_attr, None)
 	if output_key in _REF_KEYS:
 		return val.name if val is not None else None
-	if hasattr(val, "__iter__") and not isinstance(val, str):
-		try:
-			return list(val)
-		except Exception:
-			pass
-	return val
+	# See extractor.coerce: mathutils types have no __iter__, so a hasattr
+	# guard silently passed Vectors through and broke snapshot capture.
+	return to_jsonable(val)
 
 
 def extract_constraint_stack(obj: Any) -> list[dict]:

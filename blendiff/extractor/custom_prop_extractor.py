@@ -5,6 +5,8 @@ from typing import Any
 
 from .identity import ID_KEY
 
+from .coerce import to_jsonable
+
 log = logging.getLogger(__name__)
 
 # Keys to always skip. These are Blender internals or BlenDiff's own
@@ -34,16 +36,9 @@ def _is_serializable(val: Any) -> bool:
 
 def _coerce(val: Any) -> Any:
 
-	if val is None or isinstance(val, (bool, int, float, str)):
-		return val
-	# IDPropertyArray (int[], float[]) — iterate to list
-	if hasattr(val, "__iter__") and not isinstance(val, (str, dict)):
-		try:
-			items = [_coerce(v) for v in val]
-			return items
-		except Exception:
-			pass
-	return str(val)
+	# Handles IDPropertyArray, and mathutils types whose lack of __iter__
+	# previously let them through unconverted.
+	return to_jsonable(val)
 
 
 def extract_custom_props(obj: Any) -> dict[str, Any]:

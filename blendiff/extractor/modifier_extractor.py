@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .coerce import to_jsonable
+
 
 # Properties to extract per modifier type.
 # Each entry is a list of (bpy_attr, output_key) pairs.
@@ -107,13 +109,10 @@ def _resolve(mod, bpy_attr: str, output_key: str):
 	if output_key == "object_name":
 		# val is a bpy Object or None
 		return val.name if val is not None else None
-	# Convert iterables (e.g. use_axis tuple) to plain lists
-	if hasattr(val, "__iter__") and not isinstance(val, str):
-		try:
-			return list(val)
-		except Exception:
-			pass
-	return val
+	# Vectors, colours and the rest of mathutils do not expose __iter__, so a
+	# hasattr check let them through unconverted and json.dumps then refused
+	# the whole snapshot. Attempt the conversion instead of asking.
+	return to_jsonable(val)
 
 
 def extract_modifier_stack(obj) -> list[dict]:
