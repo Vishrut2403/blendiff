@@ -16,6 +16,8 @@ feature does nothing).
 import os
 import sys
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from blendiff.extractor import geometry_hash as gh
@@ -313,30 +315,51 @@ class TestHashVersioning:
 		assert gh.hash_version(None) == 1
 
 
+try:
+	import numpy  # noqa: F401
+	HAS_NUMPY = True
+except ImportError:
+	HAS_NUMPY = False
+
+
 class TestVectorisedPacking:
 	"""
-	Hashing runs through numpy when available and pure Python otherwise. Both
-	must produce identical bytes, or a machine without numpy would disagree
-	with one that has it about whether a mesh changed.
+	Hashing runs through numpy when available and pure Python otherwise.
+
+	Both paths must produce identical bytes, or two machines would disagree
+	about whether a mesh changed. numpy ships with Blender, so the fast path is
+	what artists actually run; the fallback exists for the pip package in a
+	bare environment, which is exactly what CI installs.
 	"""
 
 	def _values(self):
 		return [0.0, 1.0, -2.5, 1e-9, 123.456789, -0.0000005, 1e6]
 
+	@pytest.mark.skipif(not HAS_NUMPY, reason="numpy not installed")
 	def test_numpy_and_fallback_agree(self):
 		values = self._values()
-		fast = gh._pack_quantised(values)
-		slow = gh._pack_quantised_python(values)
-		assert fast is not None, "numpy should be available here"
-		assert fast == slow
+		assert gh._pack_quantised(values) == gh._pack_quantised_python(values)
 
+	@pytest.mark.skipif(not HAS_NUMPY, reason="numpy not installed")
 	def test_empty_input_agrees(self):
 		assert gh._pack_quantised([]) == gh._pack_quantised_python([]) == b""
 
-	def test_digest_matches_whichever_path_ran(self):
-		values = self._values()
+	def test_fallback_signals_when_numpy_is_absent(self):
+		"""
+		_pack_quantised returns None rather than raising when numpy is missing,
+		so hash_floats can fall back instead of the whole extraction failing.
+		"""
+		packed = gh._pack_quantised(self._values())
+		if HAS_NUMPY:
+			assert packed is not None
+		else:
+			assert packed is None
+
+	def test_hashing_works_either_way(self):
+		"""Whichever path runs, the digest must match the fallback's bytes."""
 		from hashlib import blake2b
-        # Recompute the expected digest from the fallback bytes directly.
+
+		values = self._values()
 		expected = blake2b(gh._pack_quantised_python(values), digest_size=16).hexdigest()
 		assert gh.hash_floats(values) == f"{gh.HASH_VERSION}:{expected}"
 
