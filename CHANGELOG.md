@@ -44,7 +44,49 @@
   against Blender. 55 checks now drive the real addon inside Blender, and CI
   runs them
 
+- **Blender Extensions Platform support.** A `blender_manifest.toml` inside
+  `blendiff/` makes the addon installable from Edit → Preferences → Get
+  Extensions, with automatic updates — no zip download, no terminal. The
+  release workflow now publishes both an extension zip (Blender 4.2+) and the
+  legacy addon zip (3.6+), since the manifest requires 4.2 while `bl_info`
+  still supports older versions
+
+### Changed
+- **HTML reports no longer land in your project directory.** They are
+  timestamped, so one accumulated per export and the folder holding the
+  `.blend` slowly filled with files nobody chose to keep there. Exporting now
+  opens a file browser, like every other export in Blender, defaulting to the
+  system temp directory. A project directory holds just the `.blend` and its
+  `.blendiff` sidecar
+- **Relicensed to GPL-3.0-or-later.** The Extensions Platform requires it:
+  anything using the `bpy` API is treated as a derivative of Blender, which is
+  itself GPL. One licence covers the whole project, so the pip package and the
+  addon remain the same code under the same terms
+
 ### Fixed
+- **Object identity now survives a session closed without saving.** Snapshot
+  capture stamps a `_blendiff_id` into each object, but writing a custom
+  property does not set Blender's dirty flag — so the user was never prompted
+  to save, the stamps evaporated on close, and the next session minted fresh
+  ids matching nothing in the stored snapshots. Rename tracking, the whole
+  reason identity exists, silently degraded to the name matching it replaces.
+  Two fixes: stamping now marks the file modified so the save prompt appears,
+  and an object missing its stamp recovers the id recorded for that name in
+  the most recent snapshot, making the sidecar the durable record. A rename
+  made *within* an unsaved session still cannot be recovered — nothing links
+  the old and new names — and that limit is asserted in the test suite
+- **A `.blend` separated from its `.blendiff` now says so.** Moving or renaming
+  a `.blend` without its sidecar showed an empty snapshot list, identical to
+  never having taken one. Objects keep their identity stamps inside the
+  `.blend`, so stamps present with no sidecar beside the file proves history
+  existed elsewhere, and BlenDiff reports it
+- **Addon teardown is no longer all-or-nothing.** `unregister_class` raises for
+  a class that is not registered, and the loops called it unguarded — so one
+  such class aborted the rest of `unregister`, leaving the addon half torn down
+  with WindowManager properties leaked and Blender reporting "Exception in
+  module unregister()". This fires whenever registration partially failed, and
+  in the case about to become common: installing the extension while the legacy
+  addon zip is still enabled
 - **`pip install blendiff` now ships the whole package.** `extractor/` was
   excluded from the wheel, so installing into Blender's own Python could not
   capture snapshots at all — breaking headless pipelines, despite every
