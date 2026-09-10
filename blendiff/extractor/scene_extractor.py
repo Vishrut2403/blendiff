@@ -5,6 +5,7 @@ from typing import Any
 
 from .render_extractor import extract_render_settings
 from .camera_light_extractor import extract_camera_data, extract_light_data
+from .armature_extractor import extract_armature_data, extract_pose
 from .mesh_extractor import extract_mesh_data
 from .world_extractor import extract_world_data
 from .modifier_extractor import extract_modifier_stack
@@ -138,6 +139,8 @@ class SceneExtractor:
 			"camera_data":     None,
 			"light_data":      None,
 			"mesh_data":       None,
+			"armature_data":   None,
+			"pose_bones":      {},
 			"modifier_stack":  [],
 			"constraint_stack":[],
 			"custom_props":    {},
@@ -199,6 +202,20 @@ class SceneExtractor:
 				data["mesh_data"] = extract_mesh_data(obj)
 			except Exception as exc:
 				log.warning("Failed to extract mesh data for %r: %s", obj.name, exc)
+
+		elif obj_type == "ARMATURE":
+			# Rest data and pose are captured separately: the first belongs to
+			# the rigger and lives on the shared datablock, the second belongs
+			# to the animator and lives on the object.
+			try:
+				data["armature_data"] = extract_armature_data(obj)
+			except Exception as exc:
+				log.warning("Failed to extract armature data for %r: %s", obj.name, exc)
+
+			try:
+				data["pose_bones"] = extract_pose(obj)
+			except Exception as exc:
+				log.warning("Failed to extract pose for %r: %s", obj.name, exc)
 
 		return data
 

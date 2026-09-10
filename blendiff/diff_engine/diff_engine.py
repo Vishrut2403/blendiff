@@ -27,6 +27,7 @@ from ..data_model.diff import (
 	PropertyChange,
 	SceneDiff,
 )
+from .armature_diff import diff_armature_data, diff_pose
 from .camera_light_diff import diff_camera_data, diff_light_data
 from .constraint_diff import diff_all_constraints
 from .custom_prop_diff import diff_all_custom_props
@@ -236,6 +237,17 @@ class DiffEngine:
 			changes.extend(diff_mesh_data(
 				obj_a.get("mesh_data"), obj_b.get("mesh_data"), prefix="mesh",
 			))
+		elif obj_type == "ARMATURE":
+			if schema.DOMAIN_ARMATURE in domains:
+				changes.extend(diff_armature_data(
+					obj_a.get("armature_data"), obj_b.get("armature_data"),
+					prefix="armature",
+				))
+			if schema.DOMAIN_POSE in domains:
+				changes.extend(diff_pose(
+					obj_a.get("pose_bones"), obj_b.get("pose_bones"),
+					prefix="pose.bones",
+				))
 
 		return changes
 

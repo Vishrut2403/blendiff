@@ -66,6 +66,8 @@ class SceneSerializer:
 			"camera_data":     obj.get("camera_data"),
 			"light_data":      obj.get("light_data"),
 			"mesh_data":       obj.get("mesh_data"),
+			"armature_data":   obj.get("armature_data"),
+			"pose_bones":      obj.get("pose_bones", {}),
 			"modifier_stack":  obj.get("modifier_stack", []),
 			"parent":           obj.get("parent"),
 			"constraint_stack": obj.get("constraint_stack", []),

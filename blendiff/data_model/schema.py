@@ -45,6 +45,8 @@ DOMAIN_MATERIALS = "material_slots"
 DOMAIN_CAMERA = "camera_data"
 DOMAIN_LIGHT = "light_data"
 DOMAIN_MESH = "mesh_data"
+DOMAIN_ARMATURE = "armature_data"
+DOMAIN_POSE = "pose_bones"
 DOMAIN_MODIFIERS = "modifier_stack"
 DOMAIN_PARENT = "parent"
 DOMAIN_CONSTRAINTS = "constraint_stack"
@@ -66,6 +68,8 @@ OBJECT_DOMAINS = (
 	DOMAIN_CAMERA,
 	DOMAIN_LIGHT,
 	DOMAIN_MESH,
+	DOMAIN_ARMATURE,
+	DOMAIN_POSE,
 	DOMAIN_MODIFIERS,
 	DOMAIN_PARENT,
 	DOMAIN_CONSTRAINTS,
@@ -88,6 +92,8 @@ DOMAIN_LABELS = {
 	DOMAIN_CAMERA: "Camera data",
 	DOMAIN_LIGHT: "Light data",
 	DOMAIN_MESH: "Mesh data",
+	DOMAIN_ARMATURE: "Armature rest data",
+	DOMAIN_POSE: "Pose",
 	DOMAIN_MODIFIERS: "Modifiers",
 	DOMAIN_PARENT: "Parenting",
 	DOMAIN_CONSTRAINTS: "Constraints",

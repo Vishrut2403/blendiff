@@ -27,6 +27,7 @@ pytest wrapper parses.
 """
 
 import json
+import math
 import os
 import sys
 import traceback
@@ -648,6 +649,220 @@ def test_nla_tracks_extracted():
 	tracks = extract()["objects"]["Cube"]["nla_tracks"]
 	check(tracks, "expected an NLA track")
 	check_eq(tracks[0]["name"], "BaseLayer", "track name")
+
+
+# Armatures
+#
+# Rigs were the largest blind spot: an ARMATURE object recorded only its own
+# transform, so reparenting a bone, changing the rest pose, re-posing or
+# rewiring an IK chain all reported nothing.
+
+def add_rig(name="Rig", bones=(("Spine", (0, 0, 0), (0, 0, 1), None),
+                               ("Head", (0, 0, 1), (0, 0, 2), "Spine"))):
+	"""Build an armature object with the given bones."""
+	arm = bpy.data.armatures.new(name)
+	rig = bpy.data.objects.new(name, arm)
+	bpy.context.scene.collection.objects.link(rig)
+	bpy.context.view_layer.objects.active = rig
+
+	bpy.ops.object.mode_set(mode="EDIT")
+	for bone_name, head, tail, _parent in bones:
+		bone = arm.edit_bones.new(bone_name)
+		bone.head = head
+		bone.tail = tail
+	for bone_name, _h, _t, parent in bones:
+		if parent:
+			arm.edit_bones[bone_name].parent = arm.edit_bones[parent]
+	bpy.ops.object.mode_set(mode="OBJECT")
+	return rig
+
+
+@test
+def test_armature_data_extracted():
+	reset_scene()
+	add_rig()
+	data = extract()["objects"]["Rig"]["armature_data"]
+	check(data is not None, "armature data must be captured")
+	check_eq(data["bone_count"], 2, "bone count")
+	check_eq(sorted(data["bones"]), ["Head", "Spine"], "bone names")
+
+
+@test
+def test_bone_hierarchy_extracted():
+	reset_scene()
+	add_rig()
+	bones = extract()["objects"]["Rig"]["armature_data"]["bones"]
+	check_eq(bones["Head"]["parent"], "Spine", "bone parent")
+	check(bones["Spine"]["parent"] is None, "root bone has no parent")
+
+
+@test
+def test_rest_positions_extracted():
+	reset_scene()
+	add_rig()
+	spine = extract()["objects"]["Rig"]["armature_data"]["bones"]["Spine"]
+	check_close(spine["tail_local"][2], 1.0, message="tail position")
+	check_close(spine["length"], 1.0, message="bone length")
+
+
+@test
+def test_bone_roll_extracted_without_edit_mode():
+	"""
+	roll lives only on EditBone. Deriving it from the rest matrix means a roll
+	change is detected without switching the user's object into edit mode.
+	"""
+	reset_scene()
+	rig = add_rig()
+	bpy.ops.object.mode_set(mode="EDIT")
+	rig.data.edit_bones["Spine"].roll = math.radians(30)
+	bpy.ops.object.mode_set(mode="OBJECT")
+
+	roll = extract()["objects"]["Rig"]["armature_data"]["bones"]["Spine"]["roll"]
+	check(roll is not None, "roll must be derivable outside edit mode")
+	check_close(math.degrees(roll), 30.0, tol=1e-3, message="roll in degrees")
+
+
+@test
+def test_reparenting_a_bone_is_detected():
+	reset_scene()
+	rig = add_rig(bones=(("Spine", (0, 0, 0), (0, 0, 1), None),
+	                     ("Chest", (0, 0, 1), (0, 0, 2), "Spine"),
+	                     ("Head", (0, 0, 2), (0, 0, 3), "Chest")))
+	before = extract_and_serialize()
+
+	bpy.ops.object.mode_set(mode="EDIT")
+	rig.data.edit_bones["Head"].parent = rig.data.edit_bones["Spine"]
+	bpy.ops.object.mode_set(mode="OBJECT")
+	after = extract_and_serialize()
+
+	diff = DiffEngine().compare(before, after)
+	paths = {c.property_path for d in diff.modified_objects for c in d.changes}
+	check('armature.bones["Head"].parent' in paths,
+	      f"reparenting must be reported, got {sorted(paths)}")
+
+
+@test
+def test_rest_pose_edit_is_detected():
+	reset_scene()
+	rig = add_rig()
+	before = extract_and_serialize()
+
+	bpy.ops.object.mode_set(mode="EDIT")
+	rig.data.edit_bones["Head"].tail = (0.0, 0.5, 2.0)
+	bpy.ops.object.mode_set(mode="OBJECT")
+	after = extract_and_serialize()
+
+	diff = DiffEngine().compare(before, after)
+	paths = {c.property_path for d in diff.modified_objects for c in d.changes}
+	check('armature.bones["Head"].tail_local' in paths,
+	      f"rest pose edit must be reported, got {sorted(paths)}")
+
+
+@test
+def test_pose_change_is_detected():
+	"""The animator's edit, distinct from the rigger's."""
+	reset_scene()
+	rig = add_rig()
+	before = extract_and_serialize()
+
+	rig.pose.bones["Head"].location = (0.5, 0.0, 0.0)
+	after = extract_and_serialize()
+
+	diff = DiffEngine().compare(before, after)
+	paths = {c.property_path for d in diff.modified_objects for c in d.changes}
+	check('pose.bones["Head"].location' in paths,
+	      f"pose change must be reported, got {sorted(paths)}")
+
+
+@test
+def test_pose_change_does_not_touch_rest_data():
+	"""Rest and pose stay distinguishable — different edits, different people."""
+	reset_scene()
+	rig = add_rig()
+	before = extract_and_serialize()
+	rig.pose.bones["Head"].location = (0.5, 0.0, 0.0)
+	after = extract_and_serialize()
+
+	diff = DiffEngine().compare(before, after)
+	paths = {c.property_path for d in diff.modified_objects for c in d.changes}
+	check(not any(p.startswith("armature.") for p in paths),
+	      f"posing must not report rest changes, got {sorted(paths)}")
+
+
+@test
+def test_added_bone_is_detected():
+	reset_scene()
+	rig = add_rig()
+	before = extract_and_serialize()
+
+	bpy.ops.object.mode_set(mode="EDIT")
+	bone = rig.data.edit_bones.new("Jaw")
+	bone.head = (0, 0, 2)
+	bone.tail = (0, 0.5, 2)
+	bpy.ops.object.mode_set(mode="OBJECT")
+	after = extract_and_serialize()
+
+	diff = DiffEngine().compare(before, after)
+	paths = {c.property_path for d in diff.modified_objects for c in d.changes}
+	check('armature.bones["Jaw"]' in paths, f"new bone expected, got {sorted(paths)}")
+
+
+@test
+def test_bone_constraints_extracted():
+	"""IK and Copy Rotation on pose bones are the heart of a rig."""
+	reset_scene()
+	rig = add_rig()
+	con = rig.pose.bones["Head"].constraints.new("COPY_ROTATION")
+	con.target = rig
+
+	pose = extract()["objects"]["Rig"]["pose_bones"]
+	constraints = pose["Head"]["constraints"]
+	check(constraints, "bone constraint must be captured")
+	check_eq(constraints[0]["type"], "COPY_ROTATION", "constraint type")
+
+
+@test
+def test_bone_constraint_change_is_detected():
+	reset_scene()
+	rig = add_rig()
+	con = rig.pose.bones["Head"].constraints.new("COPY_ROTATION")
+	con.target = rig
+	before = extract_and_serialize()
+
+	con.influence = 0.25
+	after = extract_and_serialize()
+
+	diff = DiffEngine().compare(before, after)
+	paths = {c.property_path for d in diff.modified_objects for c in d.changes}
+	check(any("constraints" in p for p in paths),
+	      f"bone constraint change expected, got {sorted(paths)}")
+
+
+@test
+def test_unchanged_rig_produces_no_diff():
+	"""Guards against phantom rig churn on every snapshot."""
+	reset_scene()
+	rig = add_rig()
+	rig.pose.bones["Head"].location = (0.25, 0.0, 0.0)
+
+	first = extract_and_serialize()
+	second = extract_and_serialize()
+	diff = DiffEngine().compare(first, second)
+	check(not diff.has_changes, f"identical rigs must not differ: {diff.summary()}")
+
+
+@test
+def test_pose_position_toggle_is_detected():
+	reset_scene()
+	rig = add_rig()
+	before = extract_and_serialize()
+	rig.data.pose_position = "REST"
+	after = extract_and_serialize()
+
+	diff = DiffEngine().compare(before, after)
+	paths = {c.property_path for d in diff.modified_objects for c in d.changes}
+	check("armature.pose_position" in paths,
+	      f"pose position toggle expected, got {sorted(paths)}")
 
 
 # Scene-level
