@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+### Changed
+- **Geometry hashing is about eleven times faster.** Profiling a scene shaped
+  like a real asset (a 130k vertex hero mesh, a 200 bone rig, 60 props with
+  node graphs) showed hashing taking most of extraction, at roughly 10.5
+  microseconds per vertex. That put a two million vertex sculpt near 21 seconds
+  per snapshot, long enough that an artist would assume the addon had hung.
+  Two changes brought it to about 0.95 microseconds per vertex, measured as
+  linear from 8k to 522k vertices:
+  - `foreach_get` now fills a numpy buffer and quantisation runs in one
+    vectorised pass, instead of a Python list and a per float loop
+  - those buffers use float32, matching how Blender stores coordinates and UVs.
+    A float64 buffer made `foreach_get` convert every element rather than copy
+    the block: 12.7 ms against 2.9 ms for one dense mesh's vertices, and
+    40.5 ms against 13.6 ms for its UVs. Widening to float64 afterwards is
+    exact, so the quantised values and the digests are unchanged
+  Warm extraction of the whole test scene went from about 1.5 seconds to 186
+  ms. A two million vertex mesh drops from about 21 seconds to about 2. The
+  pure Python path stays as a fallback and produces byte identical output,
+  which is tested
+- Geometry digests now carry a format version, written as `2:` followed by the
+  hash. Digests are only meaningful against one produced the same way, so a
+  snapshot taken before this change is treated as not comparable rather than as
+  a scene where every mesh was edited. Without that, the first diff after
+  upgrading would be full of geometry edits nobody made
+
+
 ### Added
 - **Merge can now apply rest-bone changes.** Reparenting a bone, moving its
   rest position and changing its roll were reported as read-only, because those
