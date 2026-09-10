@@ -353,3 +353,55 @@ reference costs a fixed 32 characters. Real objects carry material node graphs
 and run to kilobytes, so the trade is overwhelmingly favourable — but for
 trivially small objects a reference costs about as much as the object it
 replaces.
+
+
+---
+
+## Armatures
+
+Rigs were the largest blind spot in the tool. An ARMATURE object recorded its
+own transform, visibility and parent, and nothing about the rig itself — no
+bones, no hierarchy, no rest pose, no pose transforms, no bone constraints.
+Since rigs are the shared artefact riggers and animators collide over, that was
+the case where a semantic diff and an assisted merge mattered most.
+
+### Rest and pose are separate
+
+They are different things, owned by different people, stored in different
+places:
+
+* **Rest data** lives on the armature datablock (`obj.data`), which can be
+  shared between objects. It is the rigger's output: hierarchy, rest positions,
+  roll, deform flags, bone collections.
+* **Pose** lives on the object (`obj.pose`). It is the animator's output:
+  per-bone transforms layered over the rest pose.
+
+Keeping them apart means "the rig changed" and "the pose changed" stay
+distinguishable, which is the distinction a team actually acts on. An
+integration test asserts that posing a bone reports no rest-data change at all.
+
+### Roll without edit mode
+
+`roll` exists only on `EditBone`, so reading it directly would mean switching
+the user's object into edit mode during extraction — invasive, and impossible
+on a linked rig. `Bone.AxisRollFromMatrix` recovers the same value from the
+bone's rest matrix, verified against a known 30° roll in the integration suite.
+
+### Matching and reuse
+
+Bones are matched by **name**. They have no stable id, and their order in the
+datablock is an implementation detail. A renamed bone therefore reads as one
+removed and one added, which is honest: BlenDiff has no way to know the two are
+related.
+
+Two pieces of existing machinery carried over unchanged. `extract_constraint_stack`
+reads only `.constraints`, so it works verbatim on a pose bone — bone
+constraints came free. `diff_constraint_stack` likewise compares a bone's
+constraint stack with the same code that compares an object's.
+
+### What merge can do here
+
+Pose transforms are directly settable and are applied. Rest bones are not:
+changing them requires edit mode, so they are reported as informational with
+that reason attached. Bone addition and removal, and bone constraints, are
+likewise reported rather than applied.

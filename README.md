@@ -19,6 +19,7 @@ BlenDiff aims to be **honest about what it knows**: it will not report a change 
 - **Mesh geometry diffing** — content digests for vertex positions, topology and UVs, so a moved vertex is detected even when every count and bound is unchanged; plus counts, bounding box, UV layers, shape keys, vertex groups
 - **World/environment diffing** — background color, strength, HDRI filepath, ambient occlusion
 - **Modifier stack diffing** — ordered comparison of 15+ modifier types with per-param change detection
+- **Armature & pose diffing** — bone hierarchy, rest positions, roll, deform and inheritance flags, bone collections, per-bone pose transforms, custom shapes, and bone constraints. Reparenting a finger, re-rolling a bone or rewiring an IK chain is now visible
 - **Parent/child relationship diffing** — parent name, parent type, parent bone (critical for rigs)
 - **Constraint stack diffing** — 25+ constraint types with per-param comparison (IK, Copy Location/Rotation/Scale, Track To, Child Of, and more)
 - **Custom property diffing** — detects added, removed, and changed `obj[key]` properties with float tolerance
@@ -138,6 +139,7 @@ The applier registry (`merge_engine/property_appliers.py`) is the single source 
 | Collection membership | Keyframes, drivers, NLA strips |
 | Material slot assignment | Material node graphs |
 | Parenting (world position preserved) | Object type, collection hierarchy |
+| Pose bone transforms | Rest bones (edit-mode only), bone constraints |
 | Custom properties | Object creation (needs the source file) |
 | Camera and light data | |
 

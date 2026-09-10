@@ -3,6 +3,28 @@
 ## Unreleased
 
 ### Added
+- **Armature and pose diffing.** Rigs were the largest blind spot: an ARMATURE
+  object recorded only its own transform, so a character could be reparented,
+  re-rolled, re-posed or have its IK chain rewired and BlenDiff reported
+  nothing — despite rigs being the artefact riggers and animators most often
+  collide over. Now captured:
+  - **Rest data** (the rigger's output, on the shared armature datablock): bone
+    hierarchy and connection, head/tail rest positions, length, roll, deform
+    and inheritance flags, envelope settings, bone collections, pose position
+    and display type
+  - **Pose** (the animator's output, on the object): per-bone location,
+    rotation in whichever channel the bone's rotation mode selects, scale,
+    custom shape, and bone constraints
+  - Rest and pose are reported separately, so "the rig changed" stays
+    distinguishable from "the pose changed"
+- Bone roll is derived from the rest matrix via `Bone.AxisRollFromMatrix`, so a
+  roll change is detected without switching the object into edit mode — which
+  would be invasive and impossible on a linked rig
+- Merge can apply pose bone transforms. Rest bones, bone addition and removal,
+  and bone constraints are reported as informational, each with a reason
+- Property paths use Blender's own data-path syntax
+  (`pose.bones["Head"].location`), matching the UI, driver expressions and the
+  F-curve paths BlenDiff already reports
 - **Content-addressed snapshot storage** — each distinct object is stored once
   and referenced by digest, instead of every snapshot storing the whole scene
   again. On a realistic project (80 objects, 50 snapshots, a handful of edits
@@ -16,15 +38,23 @@
 - Releases attach the Blender addon zip automatically, with notes taken from
   the changelog. A tag push now performs the entire release: verify, test,
   build, publish to PyPI, create the GitHub release with the addon attached
+- **Addon end-to-end test tier.** The operators, panels, and the merge Applier
+  against real bpy had no coverage at all — every applier test used a fake, so
+  the code that writes merge results into a live scene had never once run
+  against Blender. 55 checks now drive the real addon inside Blender, and CI
+  runs them
 
-### Changed
-- Sidecar format version is now `0.3`. Files written by 0.1 and 0.2 store
-  objects inline, still open unchanged, and are packed the first time anything
-  is written
-- The sidecar remains a single human-readable JSON file. A directory-based
-  object store was measured and rejected: deduplication alone removes the cost,
-  and a directory would have given up both the single readable file and the
-  `blendiff list scene.blendiff` path contract
+### Fixed
+- **`pip install blendiff` now ships the whole package.** `extractor/` was
+  excluded from the wheel, so installing into Blender's own Python could not
+  capture snapshots at all — breaking headless pipelines, despite every
+  extractor module importing bpy lazily and importing fine without Blender.
+  The wheel and the addon zip are now the same code; what differs is only that
+  Blender discovers addons in its scripts/addons and extensions directories,
+  not in site-packages
+- `register()` no longer claims the PyPI package ships only the headless core,
+  which stopped being true. It now distinguishes running outside Blender from
+  the UI modules failing to import
 
 ## 0.7.0 — 2026-09-09
 
