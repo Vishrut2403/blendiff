@@ -1,4 +1,4 @@
-# BlenDiff — Architecture
+# BlenDiff Architecture
 
 ## Design Principles
 
@@ -78,7 +78,7 @@ Ver B ──► SceneSnapshot              │
 - Output: raw Python dict matching `RawScene` shape, including `node_graph`
   per material slot when `use_nodes` is True
 - Must never mutate `bpy.data`
-- Catches exceptions per-object — one bad object never kills extraction
+- Catches exceptions per-object: one bad object never kills extraction
 
 ### MaterialExtractor (`extractor/material_extractor.py`)
 - Input: `bpy.types.Material`
@@ -96,7 +96,7 @@ Ver B ──► SceneSnapshot              │
 ### DiffEngine (`diff_engine/diff_engine.py`)
 - Input: two `SerializedScene` dicts
 - Output: `SceneDiff` dataclass
-- Stateless — `compare()` is a pure function
+- Stateless: `compare()` is a pure function
 - Calls `MaterialDiff.compare_materials()` per material slot
 
 ### MaterialDiff (`diff_engine/material_diff.py`)
@@ -104,14 +104,14 @@ Ver B ──► SceneSnapshot              │
 - Output: `list[PropertyChange]`
 - Detects: node added/removed, type changed, input value changed (epsilon),
   image name changed, links added/removed/rewired
-- Links compared as sets — order irrelevant
+- Links compared as sets: order irrelevant
 
 ### DataModel (`data_model/`)
 - All schemas as Python `dataclasses`
-- `scene.py` — Transform, MaterialSlot, SceneObject, CollectionNode, SerializedScene
-- `diff.py` — ChangeKind, PropertyChange, ObjectDiff, CollectionDiff, SceneDiff
-- `material.py` — NodeInputSnapshot, NodeSnapshot, LinkSnapshot, MaterialSnapshot
-- `conflict.py` — ConflictKind, Resolution, PropertyConflict, NonConflictingChange,
+- `scene.py`: Transform, MaterialSlot, SceneObject, CollectionNode, SerializedScene
+- `diff.py`: ChangeKind, PropertyChange, ObjectDiff, CollectionDiff, SceneDiff
+- `material.py`: NodeInputSnapshot, NodeSnapshot, LinkSnapshot, MaterialSnapshot
+- `conflict.py`: ConflictKind, Resolution, PropertyConflict, NonConflictingChange,
   MergeProposal, ThreeWayDiff
 - No business logic, no I/O
 
@@ -119,7 +119,7 @@ Ver B ──► SceneSnapshot              │
 - Manages `.blendiff` JSON file next to the `.blend`
 - Stores named, timestamped snapshots with UUIDs
 - CRUD: save, list, get, delete, rename
-- Corrupted sidecar handled gracefully — never crashes Blender
+- Corrupted sidecar handled gracefully: never crashes Blender
 - Zero bpy imports
 
 ### HTMLExporter (`export/html_exporter.py`)
@@ -131,9 +131,9 @@ Ver B ──► SceneSnapshot              │
 - Zero bpy imports
 
 ### CLI / Headless API (`cli/`)
-- `api.py` — pure Python: `list_snapshots()`, `compare_snapshots()`,
+- `api.py`: pure Python: `list_snapshots()`, `compare_snapshots()`,
   `compare_snapshots_by_label()`, `compare_latest_two()`
-- `__main__.py` — `python -m blendiff.cli list|compare|latest`
+- `__main__.py`: `python -m blendiff.cli list|compare|latest`
 - Flags: `--output`, `--json`, `--fail-on-changes`, `--quiet`
 - Exit codes: 0=no changes, 1=changes+fail-on-changes, 2=error
 - Zero bpy imports
@@ -143,7 +143,7 @@ Ver B ──► SceneSnapshot              │
 - Output: `ThreeWayDiff` with `MergeProposal` per touched object
 - Detects: BOTH_MODIFIED, MODIFY_DELETE, DELETE_MODIFY, ADD_ADD
 - Auto-resolves identical changes on both sides
-- Stateless — `three_way_diff()` is a pure function
+- Stateless: `three_way_diff()` is a pure function
 - Zero bpy imports
 
 ### Applier (`merge_engine/applier.py`)
@@ -151,7 +151,7 @@ Ver B ──► SceneSnapshot              │
 - Raises `RuntimeError` if any conflict is still unresolved
 - Applies: transforms, visibility, collection moves, material slot swaps,
   object removal
-- Each proposal is independently catchable — one failure doesn't block the rest
+- Each proposal is independently catchable: one failure doesn't block the rest
 - Never called automatically
 
 ---
@@ -169,7 +169,7 @@ Ver B ──► SceneSnapshot              │
 | Corrupted sidecar | Falls back to empty sidecar, logs warning |
 | Unsaved .blend file | Sidecar operations raise `RuntimeError` with clear message |
 | Identical ADD_ADD | Auto-resolved, no proposal created |
-| Links order in node tree | Compared as sets — order irrelevant |
+| Links order in node tree | Compared as sets, order irrelevant |
 
 ---
 
@@ -193,17 +193,17 @@ All tests run without Blender (`python -m pytest tests/ -v`).
 
 ## Object Identity
 
-Diffing keyed on `obj.name` cannot survive a rename: "Cube" becoming
-"Body_LOW" reads as a deletion plus an unrelated addition, and every property
-change on that object is lost with it. Artists rename constantly, so this was
-the single largest correctness gap in the tool.
+Diffing by `obj.name` cannot survive a rename. "Cube" becoming "Body_LOW"
+reads as a deletion plus an unrelated addition, and every property change on
+that object is lost with it. Artists rename often, so this was the biggest
+correctness problem in the tool.
 
 `obj.session_uid` is unique but regenerated on file load, so it cannot link two
 snapshots. Instead each object is stamped with a UUID in a custom property,
 `_blendiff_id`. Custom properties are saved inside the `.blend`, so the id
 survives reload, rename, append and link.
 
-Rules that keep this honest:
+Rules:
 
 * **Stamping is opt-in per call.** Only snapshot capture stamps, because
   stamping writes to the `.blend` and marks it modified. Running a diff is
@@ -227,9 +227,9 @@ agree on which object is which.
 
 ## Snapshot Schema Versioning
 
-Snapshots outlive releases. BlenDiff's schema has grown every version — 0.3
+Snapshots outlive releases. BlenDiff's schema has grown every version. 0.3
 added render and world, 0.4 parenting and constraints, 0.5 custom properties
-and animation — and a snapshot taken before a feature existed has no data for
+and animation. A snapshot taken before a feature existed has no data for
 it.
 
 Without version tracking, that absence is indistinguishable from deletion: a
@@ -243,14 +243,15 @@ human-readable explanation in `skip_notes`, which the panel, the HTML report
 and the CLI all surface.
 
 Legacy snapshots have their captured domains *inferred* from which keys are
-physically present — exactly what those keys meant before versioning existed.
+physically present, which is exactly what those keys meant before versioning
+existed.
 Migration (`storage/migrate.py`) runs in memory on read, so an older BlenDiff
 can still open the sidecar; the file is only rewritten when the user calls
 `SidecarManager.migrate_file()`.
 
 Transform space is tracked the same way. Schema v1 stored transforms
 decomposed from `matrix_world`; v2 stores local transforms. The two are not
-comparable — a parented object has entirely different values in each — so a
+comparable, because a parented object has entirely different values in each, so a
 snapshot pair mixing them skips transform diffing rather than reporting noise.
 
 ---
@@ -260,21 +261,21 @@ snapshot pair mixing them skips transform diffing rather than reporting noise.
 The diff engine reports property paths across sixteen domains. The applier
 originally handled six of them through an `if/elif` chain, sending everything
 else to a debug log. The merge UI would let a user resolve a modifier or
-constraint conflict, report success, and write nothing — a silent no-op on the
-operation where silence is most dangerous.
+constraint conflict, report success, and write nothing. Silence is worst on
+exactly this operation.
 
 `merge_engine/property_appliers.py` makes the mapping data instead of control
 flow. Each entry pairs a path pattern with a writer, and the module exposes:
 
-* `can_apply(path)` — used by MergeEngine to mark each conflict `applicable`,
+* `can_apply(path)`: used by MergeEngine to mark each conflict `applicable`,
   and by the UI to decide whether to offer resolution buttons at all;
-* `unsupported_reason(path)` — an explicit, user-facing reason for each known
+* `unsupported_reason(path)`: an explicit, user-facing reason for each known
   limitation, so "cannot apply" is never an unexplained blank.
 
 Two consequences follow. Adding a diff domain without an applier is now
 *visible* rather than silent: the domain simply reports `applicable=False`
-everywhere. And conflicts BlenDiff cannot write back no longer block a merge —
-requiring a decision there would hold up the changes it *can* apply in exchange
+everywhere. Conflicts BlenDiff cannot write back no longer block a merge.
+Requiring a decision there would hold up the changes it *can* apply in exchange
 for a choice that would be discarded.
 
 Results are accounted per property (`ApplyResult.applied` / `.skipped` /
@@ -296,7 +297,7 @@ that import it locally, so a fake `bpy` (`tests/fake_bpy.py`) exercises every
 apply path including the failure paths.
 
 **Integration tests** (`tests/integration/run_in_blender.py`, run via
-`blender --background`) cover the `extractor` package — the only code that
+`blender --background`) cover the `extractor` package, the only code that
 touches real Blender data, and therefore the only place Blender API drift can
 break BlenDiff silently. The Blender 5.x layered action API used for F-curve
 extraction is exactly that kind of code: on Blender 5.1 the legacy
@@ -318,8 +319,8 @@ without Blender.
 ## Snapshot Storage
 
 Every snapshot used to store the entire scene again, even when a single object
-had moved. Measured on a realistic project — 80 objects, 50 snapshots, a
-handful of edits each — that was 24.6 MB of sidecar and a 280 ms parse, paid
+had moved. Measured on a realistic project of 80 objects, 50 snapshots and a
+handful of edits each, that was 24.6 MB of sidecar and a 280 ms parse, paid
 *every time the snapshot list was drawn*. The cost grew with disciplined use:
 an artist who snapshotted before each session was punished for it, which is
 exactly backwards for a version control tool.
@@ -328,10 +329,10 @@ Snapshots are now content-addressed. Each distinct object is stored once in a
 shared pool keyed by a digest of its content, and snapshots reference it by
 that digest (`storage/object_store.py`). An object untouched across forty
 snapshots is written once instead of forty times. The same benchmark drops to
-1.6 MB and a 17 ms parse — 15x smaller, 17x faster.
+1.6 MB and a 17 ms parse, so 15x smaller and 17x faster.
 
-Packing happens in `_write_raw`, so every path that writes — save, delete,
-rename, migrate — gets it, and a pre-0.3 sidecar with inline objects is packed
+Packing happens in `_write_raw`, so every path that writes (save, delete,
+rename, migrate) gets it, and a pre-0.3 sidecar with inline objects is packed
 the first time anything is written. Unpacking happens in `Snapshot.from_dict`,
 so the diff engine, the merge engine and the exporters never learn that any of
 this occurred.
@@ -350,7 +351,7 @@ alone captures the benefit without spending either.
 
 One caveat worth knowing: the saving is proportional to object size, because a
 reference costs a fixed 32 characters. Real objects carry material node graphs
-and run to kilobytes, so the trade is overwhelmingly favourable — but for
+and run to kilobytes, so the trade is clearly worth it. But for
 trivially small objects a reference costs about as much as the object it
 replaces.
 
@@ -360,10 +361,10 @@ replaces.
 ## Armatures
 
 Rigs were the largest blind spot in the tool. An ARMATURE object recorded its
-own transform, visibility and parent, and nothing about the rig itself — no
+own transform, visibility and parent, and nothing about the rig itself: no
 bones, no hierarchy, no rest pose, no pose transforms, no bone constraints.
-Since rigs are the shared artefact riggers and animators collide over, that was
-the case where a semantic diff and an assisted merge mattered most.
+Rigs are what riggers and animators most often work on together, so that was
+the case where a diff and an assisted merge mattered most.
 
 ### Rest and pose are separate
 
@@ -383,7 +384,7 @@ integration test asserts that posing a bone reports no rest-data change at all.
 ### Roll without edit mode
 
 `roll` exists only on `EditBone`, so reading it directly would mean switching
-the user's object into edit mode during extraction — invasive, and impossible
+the user's object into edit mode during extraction, which disturbs the user and is impossible
 on a linked rig. `Bone.AxisRollFromMatrix` recovers the same value from the
 bone's rest matrix, verified against a known 30° roll in the integration suite.
 
@@ -391,11 +392,10 @@ bone's rest matrix, verified against a known 30° roll in the integration suite.
 
 Bones are matched by **name**. They have no stable id, and their order in the
 datablock is an implementation detail. A renamed bone therefore reads as one
-removed and one added, which is honest: BlenDiff has no way to know the two are
-related.
+removed and one added. BlenDiff has no way to know the two are related.
 
 Two pieces of existing machinery carried over unchanged. `extract_constraint_stack`
-reads only `.constraints`, so it works verbatim on a pose bone — bone
+reads only `.constraints`, so it works verbatim on a pose bone, and bone
 constraints came free. `diff_constraint_stack` likewise compares a bone's
 constraint stack with the same code that compares an object's.
 

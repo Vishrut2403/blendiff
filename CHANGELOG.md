@@ -6,9 +6,9 @@
 - **Merge can now apply rest-bone changes.** Reparenting a bone, moving its
   rest position and changing its roll were reported as read-only, because those
   fields exist only on `EditBone` and reaching them means entering edit mode.
-  That constraint rules edit mode out during *extraction* — it runs on every
-  diff, must not disturb the user's mode, and cannot touch a linked rig — but
-  none of it applies when the user has explicitly asked for a merge. Merge now
+  That rules edit mode out during *extraction*, which runs on every diff, must
+  not disturb the user's mode, and cannot touch a linked rig. None of that
+  applies when the user has explicitly asked for a merge. Merge now
   handles a rigger's changes, not just an animator's
 - Rest-bone changes are applied as a **single edit-mode session per object**
   rather than one attribute at a time, which would be slow on a real rig and
@@ -22,16 +22,16 @@
   failing, and never enter edit mode
 - Bone flags (`use_deform`, inheritance, envelopes, `hide`) and armature
   settings (`pose_position`, `display_type`) apply without a mode switch at
-  all — they are writable on `Bone` directly
+  all, because they are writable on `Bone` directly
 
-## 0.8.0 — 2026-09-10
+## 0.8.0 (2026-09-10)
 
 ### Added
 - **Armature and pose diffing.** Rigs were the largest blind spot: an ARMATURE
   object recorded only its own transform, so a character could be reparented,
   re-rolled, re-posed or have its IK chain rewired and BlenDiff reported
-  nothing — despite rigs being the artefact riggers and animators most often
-  collide over. Now captured:
+  nothing, even though rigs are what riggers and animators most often work on
+  together. Now captured:
   - **Rest data** (the rigger's output, on the shared armature datablock): bone
     hierarchy and connection, head/tail rest positions, length, roll, deform
     and inheritance flags, envelope settings, bone collections, pose position
@@ -42,18 +42,18 @@
   - Rest and pose are reported separately, so "the rig changed" stays
     distinguishable from "the pose changed"
 - Bone roll is derived from the rest matrix via `Bone.AxisRollFromMatrix`, so a
-  roll change is detected without switching the object into edit mode — which
-  would be invasive and impossible on a linked rig
+  roll change is detected without switching the object into edit mode, which
+  would disturb the user and is impossible on a linked rig
 - Merge can apply pose bone transforms. Rest bones, bone addition and removal,
   and bone constraints are reported as informational, each with a reason
 - Property paths use Blender's own data-path syntax
   (`pose.bones["Head"].location`), matching the UI, driver expressions and the
   F-curve paths BlenDiff already reports
-- **Content-addressed snapshot storage** — each distinct object is stored once
+- **Content-addressed snapshot storage**: each distinct object is stored once
   and referenced by digest, instead of every snapshot storing the whole scene
   again. On a realistic project (80 objects, 50 snapshots, a handful of edits
   each) the sidecar drops from **24.6 MB to 1.6 MB** and parse time from
-  **280 ms to 17 ms** — 15x smaller, 17x faster. The cost previously grew with
+  **280 ms to 17 ms**, so 15x smaller and 17x faster. The cost previously grew with
   disciplined use, so an artist who snapshotted before each session was
   punished for it
 - Deleting a snapshot now reclaims the objects nothing else references, so
@@ -63,14 +63,14 @@
   the changelog. A tag push now performs the entire release: verify, test,
   build, publish to PyPI, create the GitHub release with the addon attached
 - **Addon end-to-end test tier.** The operators, panels, and the merge Applier
-  against real bpy had no coverage at all — every applier test used a fake, so
+  against real bpy had no coverage at all. Every applier test used a fake, so
   the code that writes merge results into a live scene had never once run
   against Blender. 55 checks now drive the real addon inside Blender, and CI
   runs them
 
 - **Blender Extensions Platform support.** A `blender_manifest.toml` inside
   `blendiff/` makes the addon installable from Edit → Preferences → Get
-  Extensions, with automatic updates — no zip download, no terminal. The
+  Extensions, with automatic updates, no zip download and no terminal. The
   release workflow now publishes both an extension zip (Blender 4.2+) and the
   legacy addon zip (3.6+), since the manifest requires 4.2 while `bl_info`
   still supports older versions
@@ -90,22 +90,22 @@
 ### Fixed
 - **Object identity now survives a session closed without saving.** Snapshot
   capture stamps a `_blendiff_id` into each object, but writing a custom
-  property does not set Blender's dirty flag — so the user was never prompted
+  property does not set Blender's dirty flag, so the user was never prompted
   to save, the stamps evaporated on close, and the next session minted fresh
   ids matching nothing in the stored snapshots. Rename tracking, the whole
   reason identity exists, silently degraded to the name matching it replaces.
   Two fixes: stamping now marks the file modified so the save prompt appears,
   and an object missing its stamp recovers the id recorded for that name in
   the most recent snapshot, making the sidecar the durable record. A rename
-  made *within* an unsaved session still cannot be recovered — nothing links
-  the old and new names — and that limit is asserted in the test suite
+  made *within* an unsaved session still cannot be recovered, because nothing
+  links the old and new names. That limit is asserted in the test suite
 - **A `.blend` separated from its `.blendiff` now says so.** Moving or renaming
   a `.blend` without its sidecar showed an empty snapshot list, identical to
   never having taken one. Objects keep their identity stamps inside the
   `.blend`, so stamps present with no sidecar beside the file proves history
   existed elsewhere, and BlenDiff reports it
 - **Addon teardown is no longer all-or-nothing.** `unregister_class` raises for
-  a class that is not registered, and the loops called it unguarded — so one
+  a class that is not registered, and the loops called it unguarded, so one
   such class aborted the rest of `unregister`, leaving the addon half torn down
   with WindowManager properties leaked and Blender reporting "Exception in
   module unregister()". This fires whenever registration partially failed, and
@@ -113,7 +113,7 @@
   addon zip is still enabled
 - **`pip install blendiff` now ships the whole package.** `extractor/` was
   excluded from the wheel, so installing into Blender's own Python could not
-  capture snapshots at all — breaking headless pipelines, despite every
+  capture snapshots at all, breaking headless pipelines, despite every
   extractor module importing bpy lazily and importing fine without Blender.
   The wheel and the addon zip are now the same code; what differs is only that
   Blender discovers addons in its scripts/addons and extensions directories,
@@ -122,17 +122,17 @@
   which stopped being true. It now distinguishes running outside Blender from
   the UI modules failing to import
 
-## 0.7.0 — 2026-09-09
+## 0.7.0 (2026-09-09)
 
 ### Added
-- **Mesh geometry diffing** — meshes now carry three content digests, so
+- **Mesh geometry diffing**: meshes now carry three content digests, so
   topology-preserving edits are detected at all. Previously mesh capture was
   counts plus a bounding box, which meant moving a vertex inside the existing
   bounds changed nothing BlenDiff recorded and the edit was reported as no
   change:
-  - `mesh.vertex_positions` — a vertex moved; the model was sculpted or tweaked
-  - `mesh.topology` — faces or edges were rebuilt, subdivided, or removed
-  - `mesh.uvs` — the model is untouched but it was re-unwrapped, or a UV layer
+  - `mesh.vertex_positions`: a vertex moved; the model was sculpted or tweaked
+  - `mesh.topology`: faces or edges were rebuilt, subdivided, or removed
+  - `mesh.uvs`: the model is untouched but it was re-unwrapped, or a UV layer
     was renamed
 - Digests are reported separately on purpose: positions changing while topology
   holds steady is a very different edit from both changing, and one combined
@@ -149,37 +149,37 @@
 - Releases now publish to PyPI through Trusted Publishing on a version tag, so
   there is no long-lived API token
 
-## 0.6.0 — 2026-09-09
+## 0.6.0 (2026-09-09)
 
 The theme of this release is **trustworthiness**: BlenDiff now refuses to report
 changes it cannot substantiate, and refuses to claim it applied changes it did
 not.
 
 ### Added
-- **Persistent object identity** — objects are stamped with a `_blendiff_id`
+- **Persistent object identity**: objects are stamped with a `_blendiff_id`
   custom property on snapshot capture, and diffs match on it before falling back
   to name. Renaming an object is now a single modified object carrying all its
   other changes, instead of an unrelated deletion plus addition
-- **Snapshot schema versioning** — snapshots record their schema version and the
+- **Snapshot schema versioning**: snapshots record their schema version and the
   domains they captured. A domain captured by only one of two snapshots is
   reported as *not compared* rather than diffed, so an old snapshot no longer
   makes every F-curve look newly added. Older snapshots are migrated on read
-- **Applier registry** — the merge applier dispatches through a data-driven
+- **Applier registry**: the merge applier dispatches through a data-driven
   registry that also answers "can this be applied?", so the merge UI marks
   unappliable differences read-only instead of soliciting a resolution it would
   silently discard
-- Merge now covers **every diff domain** — parenting, constraints, custom
+- Merge now covers **every diff domain**: parenting, constraints, custom
   properties, F-curves, drivers, NLA, collections and scene-level settings.
   Previously only object property changes participated
 - Merge can now apply parenting, custom properties, camera and light data,
   object renames, render visibility and multi-collection membership
 - Render visibility (`hide_render`) and view-layer visibility are tracked
   independently of viewport visibility
-- Full collection membership — an object linked into several collections keeps
+- Full collection membership: an object linked into several collections keeps
   all of them, recorded as full paths
 - `rotation_mode` is captured, along with quaternion and axis-angle values for
   objects driven by them
-- **Headless Blender integration tests** — 39 tests exercising the `extractor`
+- **Headless Blender integration tests**: 39 tests exercising the `extractor`
   package against a real Blender, run in CI against Blender 4.2 and 5.1
 - GitHub Actions workflow covering unit tests, integration tests and a check
   that the published wheel imports without Blender
@@ -191,7 +191,7 @@ not.
 - **Transforms are recorded in local space.** They were decomposed from
   `matrix_world`, which meant moving a parent reported a change on every
   descendant, and the merge applier wrote world-space values into local-space
-  properties — teleporting any parented object it touched
+  properties, which teleported any parented object it touched
 - **Resolved delete/modify conflicts now take effect.** `__existence__` was
   filtered out before dispatch, making the most important conflict in any merge
   a guaranteed no-op
@@ -206,7 +206,7 @@ not.
 - **Object collection paths are full paths.** Only the first collection's bare
   name was recorded, which could not be matched against the collection tree
 - **Git hashes are no longer guessed.** When the .blend's directory was not a
-  repository, snapshot capture fell back to the process working directory —
+  repository, snapshot capture fell back to the process working directory,
   stamping snapshots with the hash of whatever repository Blender was launched
   from
 - **The published wheel imports inside Blender.** `blendiff/__init__` imported
@@ -226,11 +226,11 @@ not.
   informational so the applicable changes can proceed
 - Sidecar format version is now `0.2` (reading `0.1` is fully supported)
 
-## 0.5.0 — 2026-04-30
+## 0.5.0 (2026-04-30)
 
 ### Added
-- Custom property diffing — added/removed/changed `obj[key]` properties with float tolerance
-- F-curve diffing — per-channel keyframe count, frame range, interpolation, extrapolation
+- Custom property diffing: added/removed/changed `obj[key]` properties with float tolerance
+- F-curve diffing: per-channel keyframe count, frame range, interpolation, extrapolation
 - All new diff types fully wired end-to-end: extract → serialize → snapshot → diff → UI panel → HTML report
 - `SceneDiff` now includes `custom_prop_diffs` and `fcurve_diffs`
 - `summary()` now includes counts for all new diff types
@@ -241,17 +241,17 @@ not.
 - `SceneSerializer._serialize_object` was silently dropping parent, constraint, custom prop, and F-curve fields
 - F-curve extraction compatible with both Blender 4.x (`action.fcurves`) and Blender 5.x layered action API
 
-## 0.4.0 — 2026-04-29
+## 0.4.0 (2026-04-29)
 
 ### Added
-- Parent/child relationship diffing — parent name, parent type, parent bone (critical for rigs)
-- Constraint stack diffing — per-object constraint list, type, influence, target, and 25+ type-specific params covering IK, Copy Location/Rotation/Scale, Track To, Child Of, Floor, Follow Path, Shrinkwrap, Action, and more
+- Parent/child relationship diffing: parent name, parent type, parent bone (critical for rigs)
+- Constraint stack diffing: per-object constraint list, type, influence, target, and 25+ type-specific params covering IK, Copy Location/Rotation/Scale, Track To, Child Of, Floor, Follow Path, Shrinkwrap, Action, and more
 - `SceneDiff.parent_diffs` and `SceneDiff.constraint_diffs` fields
 - `SceneDiff.summary()` now includes `parent_changes` and `constraint_changes` counts
 - `ParentDiff` and `ConstraintDiff` dataclasses with `.summary()` method
 - 71 new tests (28 parent, 43 constraint), total now 574+
 
-## 0.3.0 — 2026-04-25
+## 0.3.0 (2026-04-25)
 
 ### Added
 - Render settings diffing (engine, resolution, sampling, output, color management, Cycles, EEVEE)
@@ -267,7 +267,7 @@ not.
 - `SceneDiff.has_changes` now includes render and world changes
 - Blender 5.1 compatibility for world ambient occlusion attribute
 
-## 0.2.0 — 2026-04-22
+## 0.2.0 (2026-04-22)
 
 ### Added
 - Initial release

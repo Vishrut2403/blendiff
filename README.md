@@ -2,32 +2,32 @@
 
 **Semantic diff, snapshot history, and assisted merge for Blender `.blend` files.**
 
-BlenDiff compares two `.blend` file states using Blender's Python API — not binary diffing — and provides a full assisted merge system. It ships as both a Blender addon and a pip-installable pure-Python library for headless/CI use.
+BlenDiff compares two `.blend` file states using Blender's Python API rather than binary diffing, and provides a full assisted merge system. It ships as both a Blender addon and a pip-installable pure-Python library for headless/CI use.
 
-BlenDiff aims to be **honest about what it knows**: it will not report a change it cannot substantiate, and will not claim to have applied one it did not. Domains an older snapshot never captured are reported as *not compared* rather than diffed, and merge conflicts BlenDiff cannot write back are shown as read-only rather than soliciting a decision it would discard.
+BlenDiff only reports changes it can back up, and only claims to apply what it actually applied. If an older snapshot never recorded a kind of data, that data is marked *not compared* instead of being diffed. Merge conflicts BlenDiff cannot write back are shown as read-only, so it never asks you to pick a value it would then throw away.
 
 ---
 
 ## Features
 
-- **Snapshot history** — named, timestamped snapshots in a human-readable `.blendiff` JSON sidecar next to your `.blend` file, written atomically so a crash can never truncate your history, and content-addressed so a hundred snapshots of a mostly-unchanged scene cost a fraction of a hundred copies
-- **Rename tracking** — objects carry a persistent id, so renaming `Cube` to `Body_LOW` stays one modified object with all its other changes intact, instead of an unrelated delete plus add
-- **Object & collection diffing** — detects added, removed, renamed, and modified objects with per-property change tracking (local transform, viewport/render visibility, multi-collection membership)
-- **Material node graph diffing** — per-node, per-socket comparison including image names, input values, and rewired links
-- **Render settings diffing** — engine, resolution, sampling, output format, color management, Cycles and EEVEE sub-settings
-- **Camera & light diffing** — focal length, clip planes, DOF, sensor, light type, energy, shadow, spot/area/sun settings
-- **Mesh geometry diffing** — content digests for vertex positions, topology and UVs, so a moved vertex is detected even when every count and bound is unchanged; plus counts, bounding box, UV layers, shape keys, vertex groups
-- **World/environment diffing** — background color, strength, HDRI filepath, ambient occlusion
-- **Modifier stack diffing** — ordered comparison of 15+ modifier types with per-param change detection
-- **Armature & pose diffing** — bone hierarchy, rest positions, roll, deform and inheritance flags, bone collections, per-bone pose transforms, custom shapes, and bone constraints. Reparenting a finger, re-rolling a bone or rewiring an IK chain is now visible
-- **Parent/child relationship diffing** — parent name, parent type, parent bone (critical for rigs)
-- **Constraint stack diffing** — 25+ constraint types with per-param comparison (IK, Copy Location/Rotation/Scale, Track To, Child Of, and more)
-- **Custom property diffing** — detects added, removed, and changed `obj[key]` properties with float tolerance
-- **F-curve diffing** — per-channel keyframe count, frame range, interpolation, and extrapolation
-- **Schema versioning** — snapshots record which domains they captured, so diffing across BlenDiff versions never invents changes for a feature that did not exist yet
-- **Three-way merge** — conflict detection across *every* diff domain, with per-property resolution (Use A / Use B / Use Base) in a Blender UI that marks unappliable differences read-only
-- **Annotated HTML export** — self-contained dark-themed report with per-entry annotation textareas and JSON round-trip
-- **Headless CLI** — run diffs in CI without launching Blender
+- **Snapshot history**: named, timestamped snapshots in a human-readable `.blendiff` JSON sidecar next to your `.blend` file, written atomically so a crash can never truncate your history, and content-addressed so a hundred snapshots of a mostly-unchanged scene cost a fraction of a hundred copies
+- **Rename tracking**: objects carry a persistent id, so renaming `Cube` to `Body_LOW` stays one modified object with all its other changes intact, instead of an unrelated delete plus add
+- **Object & collection diffing**: detects added, removed, renamed, and modified objects with per-property change tracking (local transform, viewport/render visibility, multi-collection membership)
+- **Material node graph diffing**: per-node, per-socket comparison including image names, input values, and rewired links
+- **Render settings diffing**: engine, resolution, sampling, output format, color management, Cycles and EEVEE sub-settings
+- **Camera & light diffing**: focal length, clip planes, DOF, sensor, light type, energy, shadow, spot/area/sun settings
+- **Mesh geometry diffing**: content digests for vertex positions, topology and UVs, so a moved vertex is detected even when every count and bound is unchanged, plus counts, bounding box, UV layers, shape keys, vertex groups
+- **World/environment diffing**: background color, strength, HDRI filepath, ambient occlusion
+- **Modifier stack diffing**: ordered comparison of 15+ modifier types with per-param change detection
+- **Armature & pose diffing**: bone hierarchy, rest positions, roll, deform and inheritance flags, bone collections, per-bone pose transforms, custom shapes, and bone constraints. Reparenting a finger, re-rolling a bone or rewiring an IK chain is now visible
+- **Parent/child relationship diffing**: parent name, parent type, parent bone (critical for rigs)
+- **Constraint stack diffing**: 25+ constraint types with per-param comparison (IK, Copy Location/Rotation/Scale, Track To, Child Of, and more)
+- **Custom property diffing**: detects added, removed, and changed `obj[key]` properties with float tolerance
+- **F-curve diffing**: per-channel keyframe count, frame range, interpolation, and extrapolation
+- **Schema versioning**: snapshots record which domains they captured, so diffing across BlenDiff versions never invents changes for a feature that did not exist yet
+- **Three-way merge**: conflict detection across *every* diff domain, with per-property resolution (Use A / Use B / Use Base) in a Blender UI that marks unappliable differences read-only
+- **Annotated HTML export**: self-contained dark-themed report with per-entry annotation textareas and JSON round-trip
+- **Headless CLI**: run diffs in CI without launching Blender
 
 ---
 
@@ -88,7 +88,7 @@ for diff in result.object_diffs:
     for change in diff.changes:
         print(" ", change.property_path, change.old_value, "→", change.new_value)
 
-# Renames — matched by persistent id, not name
+# Renames, matched by persistent id rather than name
 for diff in result.renamed_objects:
     print(diff.previous_name, "→", diff.name)
 
@@ -119,8 +119,8 @@ for diff in result.fcurve_diffs:
 
 ```
 blendiff/
-├── data_model/      # Dataclasses — SceneDiff, ConstraintDiff, …, plus schema.py
-├── diff_engine/     # Pure comparison logic — no bpy
+├── data_model/      # Dataclasses: SceneDiff, ConstraintDiff, plus schema.py
+├── diff_engine/     # Pure comparison logic, no bpy
 ├── serializer/      # mathutils → JSON-safe types
 ├── storage/         # .blendiff sidecar CRUD + schema migration
 ├── merge_engine/    # Three-way merge and the applier registry
@@ -134,7 +134,7 @@ The extractor is the **only** module that reads from `bpy`. Everything downstrea
 
 ### What merge can and cannot apply
 
-The applier registry (`merge_engine/property_appliers.py`) is the single source of truth, and `can_apply(property_path)` answers it directly. The merge UI uses that answer to decide whether to offer a resolution at all, so it never asks you to choose between two values it would then discard.
+The applier registry (`merge_engine/property_appliers.py`) decides this, and `can_apply(property_path)` answers it directly. The merge UI uses that answer to decide whether to offer a choice at all, so it never asks you to pick between two values it would then throw away.
 
 | Applied automatically | Reported, but reconcile by hand |
 |---|---|
@@ -144,13 +144,13 @@ The applier registry (`merge_engine/property_appliers.py`) is the single source 
 | Material slot assignment | Material node graphs |
 | Parenting (world position preserved) | Object type, collection hierarchy |
 | Pose bone transforms | Bone constraints |
-| Rest bones — parenting, rest pose, roll, flags | Adding or removing bones |
+| Rest bones: parenting, rest pose, roll, flags | Adding or removing bones |
 | Custom properties | Object creation (needs the source file) |
 | Camera and light data | |
 
 ### Snapshot compatibility
 
-Snapshots record a schema version and the set of domains they captured. A domain captured by only one of two snapshots is reported as **not compared** rather than diffed — otherwise a snapshot taken before F-curve support existed would make every curve in a newer snapshot look newly added. Older snapshots are migrated to the current schema as they are read; the file on disk is left alone until you call `SidecarManager.migrate_file()`.
+Snapshots record a schema version and the set of domains they captured. A domain captured by only one of two snapshots is reported as **not compared** rather than diffed. Otherwise a snapshot taken before F-curve support existed would make every curve in a newer snapshot look newly added. Older snapshots are migrated to the current schema as they are read; the file on disk is left alone until you call `SidecarManager.migrate_file()`.
 
 ---
 
@@ -159,7 +159,7 @@ Snapshots record a schema version and the set of domains they captured. A domain
 ```bash
 pip install blendiff[dev]
 
-# Pure-Python core — no Blender needed
+# Pure-Python core, no Blender needed
 pytest tests/ -v -m "not integration"
 
 # Everything, including the extractor tests that run inside Blender
@@ -182,7 +182,7 @@ BLENDER_BINARY=/opt/blender-4.2/blender pytest tests/integration -v
   run: blendiff latest scene.blendiff --fail-on-changes
 ```
 
-See `docs/ci_example.yml` for a diff-checking workflow template, and `.github/workflows/tests.yml` for the project's own CI — unit tests across Python 3.10–3.12, integration tests against Blender 4.2 and 5.1, and a check that the published wheel imports without Blender.
+See `docs/ci_example.yml` for a diff-checking workflow template, and `.github/workflows/tests.yml` for the project's own CI: unit tests across Python 3.10–3.12, integration tests against Blender 4.2 and 5.1, and a check that the published wheel imports without Blender.
 
 ## Releasing
 
