@@ -23,10 +23,12 @@ import pytest
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _SCRIPT = os.path.join(_HERE, "run_in_blender.py")
+_ADDON_SCRIPT = os.path.join(_HERE, "run_addon_in_blender.py")
 _REPO_ROOT = os.path.dirname(os.path.dirname(_HERE))
 
-#: Marker the in-Blender runner prints so results survive Blender's own noise.
+#: Markers the in-Blender runners print so results survive Blender's own noise.
 _RESULT_PREFIX = "BLENDIFF_RESULT "
+_ADDON_RESULT_PREFIX = "BLENDIFF_ADDON_RESULT "
 
 #: Blender start-up plus scene building; generous so a slow CI runner does not
 #: produce a flaky failure.
@@ -49,14 +51,16 @@ requires_blender = pytest.mark.skipif(
 )
 
 
-def _run_suite() -> dict:
-	"""Run the in-Blender suite once and return its parsed result."""
+def _run_suite(script: str = None, prefix: str = None) -> dict:
+	"""Run one in-Blender suite and return its parsed result."""
+	script = script or _SCRIPT
+	prefix = prefix or _RESULT_PREFIX
 	completed = subprocess.run(
 		[
 			BLENDER,
 			"--background",
 			"--factory-startup",  # ignore the user's addons and preferences
-			"--python", _SCRIPT,
+			"--python", script,
 		],
 		cwd=_REPO_ROOT,
 		capture_output=True,
@@ -65,8 +69,8 @@ def _run_suite() -> dict:
 	)
 
 	for line in completed.stdout.splitlines():
-		if line.startswith(_RESULT_PREFIX):
-			payload = json.loads(line[len(_RESULT_PREFIX):])
+		if line.startswith(prefix):
+			payload = json.loads(line[len(prefix):])
 			payload["output"] = completed.stdout
 			return payload
 
@@ -107,4 +111,36 @@ class TestBlenderIntegration:
 		drop in count is worth failing over rather than quietly accepting.
 		"""
 		total = suite_result["passed"] + suite_result["failed"]
-		assert total >= 35, f"integration suite unexpectedly small: {total} tests"
+		assert total >= 55, f"integration suite unexpectedly small: {total} tests"
+
+
+@pytest.fixture(scope="module")
+def addon_result() -> dict:
+	"""Run the addon end-to-end suite once and share it across tests."""
+	return _run_suite(_ADDON_SCRIPT, _ADDON_RESULT_PREFIX)
+
+
+@pytest.mark.integration
+@requires_blender
+class TestAddonEndToEnd:
+	"""
+	The operators, panels, Applier and CLI, driven inside real Blender.
+
+	This is the only place the merge Applier runs against actual bpy — every
+	applier unit test uses a fake — so a regression here would otherwise reach
+	users before anything caught it.
+	"""
+
+	def test_suite_runs(self, addon_result):
+		assert addon_result["passed"] > 0, "no addon checks ran"
+
+	def test_no_failures(self, addon_result):
+		failures = addon_result["failures"]
+		assert not failures, (
+			"addon end-to-end failures: " + ", ".join(failures)
+			+ "\n\n" + addon_result["output"][-6000:]
+		)
+
+	def test_coverage_is_meaningful(self, addon_result):
+		total = addon_result["passed"] + addon_result["failed"]
+		assert total >= 50, f"addon suite unexpectedly small: {total} checks"

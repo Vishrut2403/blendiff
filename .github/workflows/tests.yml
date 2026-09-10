@@ -76,6 +76,13 @@ jobs:
           BLENDER_BINARY: /home/runner/blender/blender
         run: pytest tests/integration -v
 
+      # The addon suite drives the operators, panels and the Applier against
+      # real bpy. It is the only coverage that layer has.
+      - name: Run addon end-to-end suite
+        env:
+          BLENDER_BINARY: /home/runner/blender/blender
+        run: pytest tests/integration -v -k AddonEndToEnd
+
   package:
     name: Package builds and imports
     runs-on: ubuntu-latest
