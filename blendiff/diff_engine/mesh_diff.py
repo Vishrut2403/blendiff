@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from blendiff.data_model.diff import PropertyChange
+from blendiff.extractor.geometry_hash import comparable as _hashes_comparable
 
 _EPSILON = 1e-4  # tolerance for bounding box float comparison
 
@@ -73,6 +74,11 @@ def diff_mesh_data(
 			# before geometry hashing existed have no digest, and comparing a
 			# digest against its absence would report an edit nobody made.
 			if key not in mesh_a or key not in mesh_b:
+				continue
+			# Digests are only meaningful against one produced the same way.
+			# A snapshot from before the hash format changed would otherwise
+			# make every mesh in the scene look edited.
+			if not _hashes_comparable(val_a, val_b):
 				continue
 			if val_a != val_b:
 				changes.append(PropertyChange(

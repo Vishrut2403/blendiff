@@ -105,10 +105,17 @@ class TestHashFloats:
 	def test_length_matters(self):
 		assert gh.hash_floats([1.0]) != gh.hash_floats([1.0, 0.0])
 
-	def test_digest_is_short_hex(self):
+	def test_digest_is_versioned_hex(self):
+		"""
+		Digests carry the format version, so a snapshot from before the hash
+		changed is treated as not comparable rather than as a scene where
+		every mesh was edited.
+		"""
 		digest = gh.hash_floats([1.0])
-		assert len(digest) == 32
-		int(digest, 16)  # raises if not hex
+		version, _, body = digest.partition(":")
+		assert int(version) == gh.HASH_VERSION
+		assert len(body) == 32
+		int(body, 16)  # raises if not hex
 
 
 class TestHashInts:
@@ -274,3 +281,65 @@ class TestExtractGeometryHashes:
 
 		hashes = gh.extract_geometry_hashes(Nothing())
 		assert all(v == gh.EMPTY for v in hashes.values())
+
+
+class TestHashVersioning:
+	"""
+	The digest format changed when hashing was vectorised: version 1 built a
+	comma-joined decimal string in Python at about 3.5 microseconds per float,
+	which put a two-million-vertex sculpt near twenty seconds per snapshot.
+
+	Comparing a v1 digest against a v2 one is meaningless, and reporting it as
+	a difference would fill the first diff after an upgrade with geometry edits
+	nobody made.
+	"""
+
+	def test_unprefixed_digest_reads_as_version_1(self):
+		assert gh.hash_version("abcdef0123456789") == 1
+
+	def test_current_digests_carry_the_version(self):
+		assert gh.hash_version(gh.hash_floats([1.0])) == gh.HASH_VERSION
+
+	def test_same_version_is_comparable(self):
+		assert gh.comparable(gh.hash_floats([1.0]), gh.hash_floats([2.0]))
+
+	def test_across_versions_is_not_comparable(self):
+		assert not gh.comparable(gh.hash_floats([1.0]), "abcdef0123456789")
+
+	def test_malformed_digest_reads_as_version_1(self):
+		assert gh.hash_version("notaversion:abc") == 1
+
+	def test_non_string_reads_as_version_1(self):
+		assert gh.hash_version(None) == 1
+
+
+class TestVectorisedPacking:
+	"""
+	Hashing runs through numpy when available and pure Python otherwise. Both
+	must produce identical bytes, or a machine without numpy would disagree
+	with one that has it about whether a mesh changed.
+	"""
+
+	def _values(self):
+		return [0.0, 1.0, -2.5, 1e-9, 123.456789, -0.0000005, 1e6]
+
+	def test_numpy_and_fallback_agree(self):
+		values = self._values()
+		fast = gh._pack_quantised(values)
+		slow = gh._pack_quantised_python(values)
+		assert fast is not None, "numpy should be available here"
+		assert fast == slow
+
+	def test_empty_input_agrees(self):
+		assert gh._pack_quantised([]) == gh._pack_quantised_python([]) == b""
+
+	def test_digest_matches_whichever_path_ran(self):
+		values = self._values()
+		from hashlib import blake2b
+        # Recompute the expected digest from the fallback bytes directly.
+		expected = blake2b(gh._pack_quantised_python(values), digest_size=16).hexdigest()
+		assert gh.hash_floats(values) == f"{gh.HASH_VERSION}:{expected}"
+
+	def test_indices_do_not_alias_coordinates(self):
+		"""Index data is tagged, so 1,2 as indices differs from 1.0,2.0 as coords."""
+		assert gh.hash_ints([1, 2]) != gh.hash_floats([1.0, 2.0])
