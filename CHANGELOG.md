@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+### Fixed
+- **Snapshot capture failed outright on many real scenes.** Three extractors
+  guarded their value conversion with `hasattr(val, "__iter__")`, which is
+  False for every mathutils type: Vector, Color, Euler, Quaternion and Matrix
+  all implement the older sequence protocol instead. A Vector therefore passed
+  through unconverted and `json.dumps` rejected the entire sidecar, so capture
+  raised TypeError and wrote nothing at all. An Array modifier with a relative
+  offset was enough to trigger it, and the same guard was used for constraint
+  parameters and custom properties, so those leaked too.
+
+  Conversion now attempts `list()` rather than asking the value which protocol
+  it supports, and the serializer runs every passed-through field through the
+  same helper, so one leaky extractor can no longer break capture for a whole
+  scene.
+
+  This went unnoticed because every test fixture built its modifiers from
+  plain Python floats. It surfaced the first time BlenDiff ran against a
+  .blend that a person had actually authored, and there is now a Blender test
+  covering a vector modifier parameter, a vector constraint parameter and a
+  vector custom property.
+
+
 ### Changed
 - **Geometry hashing is about eleven times faster.** Profiling a scene shaped
   like a real asset (a 130k vertex hero mesh, a 200 bone rig, 60 props with
