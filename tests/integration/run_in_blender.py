@@ -1226,6 +1226,75 @@ def test_bone_flags_apply_without_entering_edit_mode():
 	check_eq(rig.data.pose_position, "REST", "armature setting applied")
 
 
+@test
+def test_vector_valued_parameters_survive_serialization():
+	"""
+	mathutils types have no __iter__, so a hasattr guard let a Vector through
+	unconverted and json.dumps then rejected the entire snapshot. Capture
+	produced nothing at all, and an Array modifier's relative offset was
+	enough to trigger it.
+
+	Every fixture here built modifiers from plain floats, which is why this
+	took a real .blend to find.
+	"""
+	import json
+
+	reset_scene()
+	obj = add_mesh("Cube")
+
+	# An Array modifier's offset is a Vector: the exact case that broke.
+	array = obj.modifiers.new("Array", "ARRAY")
+	array.use_relative_offset = True
+	array.relative_offset_displace = (0.0, 0.0, -1.38)
+
+	# A vector-valued constraint parameter.
+	target = add_mesh("Target")
+	limit = obj.constraints.new("LIMIT_LOCATION")
+	limit.use_min_x = True
+	copy_loc = obj.constraints.new("COPY_LOCATION")
+	copy_loc.target = target
+
+	# A vector-valued custom property.
+	obj["offset_vector"] = (1.0, 2.0, 3.0)
+
+	scene = extract_and_serialize()
+
+	from blendiff.extractor.coerce import is_jsonable
+	check(is_jsonable(scene), "the whole snapshot must be JSON-safe")
+
+	# The real assertion: this raised TypeError before the fix.
+	text = json.dumps(scene)
+	check(json.loads(text) == scene, "snapshot must survive a JSON round trip")
+
+	params = scene["objects"]["Cube"]["modifier_stack"][0].get("params", {})
+	offset = params.get("relative_offset")
+	check(isinstance(offset, list), f"offset should be a list, got {type(offset).__name__}")
+	check_close(offset[2], -1.38, message="offset value preserved")
+
+
+@test
+def test_snapshot_capture_survives_vector_parameters():
+	"""End to end: the sidecar must actually be written, not just built."""
+	import tempfile
+
+	reset_scene()
+	obj = add_mesh("Cube")
+	array = obj.modifiers.new("Array", "ARRAY")
+	array.use_relative_offset = True
+	array.relative_offset_displace = (0.5, 0.0, -1.38)
+
+	path = os.path.join(tempfile.mkdtemp(), "vectors.blend")
+	bpy.ops.wm.save_as_mainfile(filepath=path)
+
+	snapshot = capture_snapshot(path, "with-vectors")
+	check(snapshot is not None, "capture must succeed")
+
+	from blendiff.storage.sidecar import SidecarManager
+	manager = SidecarManager(path)
+	check(os.path.exists(manager.sidecar_path), "sidecar must be written to disk")
+	check_eq(len(manager.list_snapshots()), 1, "snapshot must be readable back")
+
+
 # Scene-level
 
 @test
