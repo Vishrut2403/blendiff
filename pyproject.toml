@@ -12,7 +12,7 @@ name = "blendiff"
 dynamic = ["version"]
 description = "Semantic diff, snapshot history, and assisted merge for Blender .blend files"
 readme = "README.md"
-license = { text = "MIT" }
+license = { text = "GPL-3.0-or-later" }
 authors = [{ name = "Vishrut", email = "" }]
 requires-python = ">=3.10"
 keywords = ["blender", "diff", "3d", "vfx", "pipeline", "addon"]
@@ -20,7 +20,7 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Intended Audience :: End Users/Desktop",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",

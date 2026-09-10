@@ -1,6 +1,25 @@
 """
 BlenDiff — semantic diff, snapshot history and assisted merge for .blend files.
 
+Copyright (C) 2026 Vishrut Sachan
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with
+this program. If not, see <https://www.gnu.org/licenses/>.
+
+Blender's Extensions Platform requires add-ons to be GPL-3.0-or-later, since
+anything using the bpy API is treated as a derivative of Blender itself. The
+whole project is licensed that way rather than splitting it, so the pip package
+and the addon are the same code under the same terms.
+
 This module is both the Blender addon entry point and the root of the
 pip-installable library, so it must import cleanly in three environments:
 inside Blender with the UI present, inside Blender's Python with only the
