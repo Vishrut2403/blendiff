@@ -32,6 +32,8 @@ import re
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
+from .armature_applier import REST_BONE_PATH as _REST_BONE_EDIT
+
 log = logging.getLogger(__name__)
 
 #: Structural markers the merge engine uses instead of real property paths.
@@ -42,11 +44,19 @@ PATH_ADD_ADD = "__add_add__"
 
 @dataclass(frozen=True)
 class ApplierEntry:
-	"""One applicable property path family."""
+	"""
+	One applicable property path family.
+
+	``batched`` marks paths the Applier handles as a group before per-property
+	dispatch — rest bones need a single edit-mode session for the whole object,
+	so they cannot be written one attribute at a time. They still belong in the
+	registry so that can_apply() reports them as applicable.
+	"""
 
 	pattern: re.Pattern
 	writer: Callable[..., None]
 	description: str
+	batched: bool = False
 
 	def matches(self, property_path: str) -> bool:
 		return bool(self.pattern.match(property_path))
@@ -320,6 +330,73 @@ def _apply_pose_bone(obj: Any, path: str, value: Any, context: Any) -> None:
 		setattr(pose_bone, attr, tuple(value))
 
 
+#: Rest-bone properties writable without entering edit mode. The geometry and
+#: hierarchy fields are not here — see merge_engine.armature_applier.
+REST_BONE_FLAGS: dict[str, str] = {
+	"use_deform": "use_deform",
+	"use_inherit_rotation": "use_inherit_rotation",
+	"inherit_scale": "inherit_scale",
+	"envelope_distance": "envelope_distance",
+	"envelope_weight": "envelope_weight",
+	"hide": "hide",
+}
+
+_REST_BONE_FLAG = re.compile(
+	r'^armature\.bones\["(?P<bone>[^"]+)"\]\.(?P<field>' +
+	"|".join(REST_BONE_FLAGS) + r")$"
+)
+
+#: Armature datablock settings, writable in object mode.
+ARMATURE_SETTINGS: dict[str, str] = {
+	"pose_position": "pose_position",
+	"display_type": "display_type",
+}
+
+
+def _apply_rest_bone_flag(obj: Any, path: str, value: Any, context: Any) -> None:
+	"""
+	Set a rest-bone flag that does not require edit mode.
+
+	Deform and inheritance flags change how a rig behaves without moving
+	anything, which makes them easy to break unnoticed and worth merging.
+	"""
+	match = _REST_BONE_FLAG.match(path)
+	if not match:
+		raise ValueError(f"Cannot parse rest bone path {path!r}")
+
+	if obj.data is None:
+		raise ValueError(f"{obj.name!r} has no armature data.")
+
+	bone = obj.data.bones.get(match.group("bone"))
+	if bone is None:
+		raise ValueError(f"{obj.name!r} has no bone {match.group('bone')!r}.")
+
+	attr = REST_BONE_FLAGS[match.group("field")]
+	current = getattr(bone, attr)
+	setattr(bone, attr, type(current)(value) if isinstance(current, bool) else value)
+
+
+def _apply_armature_setting(obj: Any, path: str, value: Any, context: Any) -> None:
+	key = path.split(".", 1)[1]
+	attr = ARMATURE_SETTINGS.get(key)
+	if attr is None:
+		raise ValueError(f"Unsupported armature property {key!r}")
+	if obj.data is None:
+		raise ValueError(f"{obj.name!r} has no armature data.")
+	setattr(obj.data, attr, value)
+
+
+def _batched_elsewhere(obj: Any, path: str, value: Any, context: Any) -> None:
+	"""
+	Placeholder writer for paths the Applier batches.
+
+	Reaching this means per-property dispatch was handed something the batch
+	phase should already have consumed, which is a bug rather than a user
+	error.
+	"""
+	raise RuntimeError(f"{path!r} must be applied by the batched rest-bone pass")
+
+
 def _apply_camera(obj: Any, path: str, value: Any, context: Any) -> None:
 	key = path.split(".", 1)[1]
 	attr = CAMERA_ATTRS.get(key)
@@ -361,6 +438,15 @@ REGISTRY: tuple[ApplierEntry, ...] = (
 	ApplierEntry(re.compile(r"^parent\.(parent_name|parent_type|parent_bone)$"), _apply_parent, "Parenting"),
 	ApplierEntry(re.compile(r"^custom_props\.[^.]+$"), _apply_custom_prop, "Custom property"),
 	ApplierEntry(_POSE_BONE, _apply_pose_bone, "Pose bone transform"),
+	ApplierEntry(_REST_BONE_FLAG, _apply_rest_bone_flag, "Bone flag"),
+	ApplierEntry(
+		re.compile(r"^armature\.(pose_position|display_type)$"),
+		_apply_armature_setting, "Armature setting",
+	),
+	# Applied as a group in a single edit-mode session, not one at a time.
+	ApplierEntry(
+		_REST_BONE_EDIT, _batched_elsewhere, "Bone rest pose", batched=True,
+	),
 	ApplierEntry(re.compile(r"^camera\.[^.]+$"), _apply_camera, "Camera data"),
 	ApplierEntry(re.compile(r"^light\.[^.]+$"), _apply_light, "Light data"),
 )
@@ -374,9 +460,10 @@ UNSUPPORTED_REASONS: tuple[tuple[re.Pattern, str], ...] = (
 	 "An object's type cannot be changed after creation."),
 	(re.compile(r"^visible_in_viewlayer$"),
 	 "Derived from collection and object visibility; set those instead."),
-	(re.compile(r"^armature\."),
-	 "Rest bones live on the armature datablock and can only be changed in "
-	 "edit mode; adjust the rig by hand."),
+	(re.compile(r'^armature\.bones\["[^"]+"\]$'),
+	 "BlenDiff cannot add or remove bones; edit the rig directly."),
+	(re.compile(r"^armature\.(name|bone_count|collections)$"),
+	 "Derived from the rig itself; change it in the armature."),
 	(re.compile(r'^pose\.bones\["[^"]+"\]\.constraints'),
 	 "Bone constraints are not yet applicable; re-create the constraint manually."),
 	(re.compile(r'^pose\.bones\["[^"]+"\]$'),

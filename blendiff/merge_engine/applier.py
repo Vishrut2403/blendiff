@@ -39,6 +39,7 @@ from ..data_model.conflict import (
 	TargetKind,
 	ThreeWayDiff,
 )
+from .armature_applier import apply_rest_bone_changes, is_rest_bone_edit
 from .property_appliers import (
 	PATH_ADD_ADD,
 	PATH_EXISTENCE,
@@ -232,6 +233,22 @@ class Applier:
 			(path, value) for path, value in changes
 			if path not in (PATH_STRUCTURAL, PATH_EXISTENCE, PATH_ADD_ADD)
 		]
+
+		# Rest bones exist only on EditBone, so they are applied as a group in
+		# one edit-mode session rather than one attribute at a time. Toggling
+		# modes per property would be slow on a real rig and would push a stack
+		# of undo steps.
+		rest_bone_changes = [
+			(path, value) for path, value in property_changes
+			if is_rest_bone_edit(path)
+		]
+		if rest_bone_changes:
+			self._apply_rest_bones(obj, rest_bone_changes, name, result)
+			property_changes = [
+				(path, value) for path, value in property_changes
+				if not is_rest_bone_edit(path)
+			]
+
 		property_changes.sort(key=lambda item: _priority(item[0]))
 
 		for path, value in property_changes:
@@ -244,6 +261,29 @@ class Applier:
 			except Exception as exc:
 				log.warning("Failed to apply %r on %r: %s", path, name, exc)
 				result.failed.append(ChangeOutcome(name, path, str(exc)))
+
+	def _apply_rest_bones(
+		self,
+		obj: Any,
+		changes: list[tuple[str, Any]],
+		name: str,
+		result: ApplyResult,
+	) -> None:
+		"""
+		Apply an object's rest-bone changes in a single edit-mode session.
+
+		Each change is accounted individually, so a rig where one bone is
+		missing still reports the others as applied rather than failing whole.
+		"""
+		for path, status, detail in apply_rest_bone_changes(obj, changes):
+			outcome = ChangeOutcome(name, path, detail)
+			if status == "applied":
+				result.applied.append(outcome)
+			elif status == "skipped":
+				result.skipped.append(outcome)
+			else:
+				log.warning("Failed to apply %r on %r: %s", path, name, detail)
+				result.failed.append(outcome)
 
 	def _apply_structural(
 		self,
