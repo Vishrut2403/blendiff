@@ -3,6 +3,24 @@
 ## Unreleased
 
 ### Fixed
+- **The addon did not appear in Preferences > Add-ons.** `bl_info["version"]`
+  was computed from `__version__` rather than written out as a literal tuple.
+  Blender never imports an addon to read its `bl_info`: it parses the source
+  and runs `ast.literal_eval` on the dict, which accepts only literals. The
+  computed tuple made that call raise, `addon_utils` skipped the module, and
+  BlenDiff was absent from the list. Not greyed out, not failing to enable,
+  simply not there, with nothing on screen to say why.
+
+  The addon zip attached to every release since was therefore impossible to
+  enable through the interface. Installing by hand and enabling from the
+  console still worked, which is why unit tests, the in-Blender suite and the
+  addon checks all passed: they import the module, and importing was never the
+  broken part. `tests/test_manifest.py` now parses `__init__.py` the way
+  Blender does, so a non-literal field fails in CI.
+
+  Extensions installed from a `blender_manifest.toml` were unaffected, since
+  the Extensions Platform reads the manifest and ignores `bl_info`.
+
 - **Snapshot capture failed outright on many real scenes.** Three extractors
   guarded their value conversion with `hasattr(val, "__iter__")`, which is
   False for every mathutils type: Vector, Color, Euler, Quaternion and Matrix

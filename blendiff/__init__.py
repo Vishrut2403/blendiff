@@ -28,17 +28,29 @@ pure-Python core installed from PyPI, and outside Blender entirely.
 
 #: Single source of truth for the version.
 #
-# It was previously stated in three places — here, in bl_info, and in
-# pyproject.toml — which had drifted to 0.3.0 / 0.4.0 / 0.5.0 simultaneously.
-# bl_info now derives from this, and pyproject reads it directly.
+# It was previously stated in three places, here, in bl_info, and in
+# pyproject.toml, which had drifted to 0.3.0 / 0.4.0 / 0.5.0 simultaneously.
+# pyproject reads this string directly, and a test keeps bl_info in step.
 __version__ = "0.8.0"
 
-_version_tuple = tuple(int(part) for part in __version__.split("."))
-
+# bl_info's version must be written out as a literal tuple, never computed from
+# __version__.
+#
+# Blender never imports an addon to read its bl_info. It parses the source and
+# runs ast.literal_eval on the dict, which accepts only literals and rejects a
+# variable reference. Deriving the version from a computed tuple made that call
+# raise, addon_utils skipped the module, and BlenDiff was missing from the
+# Add-ons list entirely: not greyed out or failing to enable, simply absent,
+# with no way to tick it. Every other addon in the list parsed fine, so nothing
+# pointed at BlenDiff as the cause.
+#
+# Repeating the version here is the price of that constraint. The duplication
+# is held in check by tests/test_manifest.py, which parses this file the way
+# Blender does and compares the result against __version__.
 bl_info = {
 	"name":        "BlenDiff",
 	"author":      "Vishrut Sachan",
-	"version":     _version_tuple,
+	"version":     (0, 8, 0),
 	"blender":     (3, 6, 0),
 	"location":    "3D Viewport > Sidebar > BlenDiff",
 	"description": "Semantic scene diff, snapshot history, and assisted merge for .blend files",

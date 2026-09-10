@@ -111,3 +111,51 @@ class TestPlatformConstraints:
 		patterns = manifest.get("build", {}).get("paths_exclude_pattern", [])
 		joined = " ".join(patterns)
 		assert "tests" in joined and "__pycache__" in joined
+
+
+class TestBlInfoIsParseableWithoutImporting:
+	"""
+	bl_info must survive the way Blender actually reads it.
+
+	Every other test here reads `blendiff.bl_info` from the imported module,
+	which is not how Blender gets at it. addon_utils never imports an addon to
+	build the Add-ons list: it parses the source file and runs ast.literal_eval
+	on the bl_info assignment. Anything that is not a literal makes that call
+	raise, addon_utils skips the module, and the addon vanishes from the list
+	with no error the user can see.
+
+	That is what happened when bl_info's version was computed from __version__.
+	The addon still imported, still registered, and every unit test passed,
+	while being impossible to enable from the interface. These tests parse the
+	file the same way Blender does so the failure surfaces here instead.
+	"""
+
+	@pytest.fixture(scope="class")
+	def parsed_bl_info(self):
+		import ast
+
+		path = os.path.join(os.path.dirname(__file__), "..", "blendiff", "__init__.py")
+		with open(path, encoding="utf-8") as handle:
+			tree = ast.parse(handle.read())
+
+		for node in tree.body:
+			if not isinstance(node, ast.Assign):
+				continue
+			for target in node.targets:
+				if isinstance(target, ast.Name) and target.id == "bl_info":
+					return ast.literal_eval(node.value)
+		pytest.fail("bl_info assignment not found in blendiff/__init__.py")
+
+	def test_bl_info_is_a_literal(self, parsed_bl_info):
+		"""Fails with ValueError if any field is computed rather than written out."""
+		assert parsed_bl_info["name"] == "BlenDiff"
+
+	def test_parsed_version_matches_dunder_version(self, parsed_bl_info):
+		expected = tuple(int(part) for part in blendiff.__version__.split("."))
+		assert parsed_bl_info["version"] == expected, (
+			"bl_info['version'] and __version__ have drifted; "
+			"bl_info must repeat the version as a literal tuple"
+		)
+
+	def test_parsed_bl_info_matches_imported(self, parsed_bl_info):
+		assert parsed_bl_info == blendiff.bl_info
