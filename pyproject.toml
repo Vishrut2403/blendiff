@@ -17,7 +17,7 @@ authors = [{ name = "Vishrut", email = "" }]
 requires-python = ">=3.10"
 keywords = ["blender", "diff", "3d", "vfx", "pipeline", "addon"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Intended Audience :: End Users/Desktop",
     "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
