@@ -76,6 +76,8 @@ class FakeObject:
 		self.override_library = None
 		self._props: dict[str, Any] = {}
 		self._collections: list[FakeCollection] = []
+		# Only armatures have a pose; None everywhere else, matching bpy.
+		self.pose = None
 
 	# Blender renames through the `name` property and keeps bpy.data in sync.
 	@property
@@ -115,6 +117,49 @@ class FakeObject:
 
 	def __repr__(self) -> str:
 		return f"<FakeObject {self._name!r}>"
+
+
+class FakePoseBone:
+	"""A pose bone: settable transform channels, plus constraints."""
+
+	def __init__(self, name):
+		self.name = name
+		self.location = (0.0, 0.0, 0.0)
+		self.rotation_euler = (0.0, 0.0, 0.0)
+		self.rotation_quaternion = (1.0, 0.0, 0.0, 0.0)
+		self.rotation_axis_angle = (0.0, 0.0, 1.0, 0.0)
+		# Pose bones default to quaternion, unlike objects.
+		self.rotation_mode = "QUATERNION"
+		self.scale = (1.0, 1.0, 1.0)
+		self.custom_shape = None
+		self.constraints = []
+
+
+class FakePoseBones:
+	"""bpy exposes pose.bones as a mapping keyed by bone name."""
+
+	def __init__(self, names=()):
+		self._bones = {name: FakePoseBone(name) for name in names}
+
+	def get(self, name, default=None):
+		return self._bones.get(name, default)
+
+	def __getitem__(self, name):
+		return self._bones[name]
+
+	def __contains__(self, name):
+		return name in self._bones
+
+	def __iter__(self):
+		return iter(self._bones.values())
+
+	def __len__(self):
+		return len(self._bones)
+
+
+class FakePose:
+	def __init__(self, bone_names=()):
+		self.bones = FakePoseBones(bone_names)
 
 
 class FakeSlot:

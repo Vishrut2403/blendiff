@@ -56,11 +56,27 @@ log = logging.getLogger(__name__)
 # channels when the mode changes, so writing values first would have them
 # converted out from under the merge. The rename goes last so that any error
 # raised along the way still names the object the user recognises.
-_PRIORITY = {
-	"transform.rotation_mode": 0,
-	"name": 99,
-}
 _DEFAULT_PRIORITY = 50
+
+
+def _priority(property_path: str) -> int:
+	"""
+	Order in which a property should be written, lowest first.
+
+	Any rotation mode goes first — Blender reinterprets the rotation channels
+	when the mode changes, so writing values before the mode would have them
+	converted out from under the merge. This matches on the suffix rather than
+	the whole path because pose bones carry their own mode per bone, at paths
+	like ``pose.bones["Head"].rotation_mode``.
+
+	The rename goes last, so an error raised along the way still names the
+	object the user recognises.
+	"""
+	if property_path.endswith("rotation_mode"):
+		return 0
+	if property_path == "name":
+		return 99
+	return _DEFAULT_PRIORITY
 
 
 @dataclass
@@ -216,7 +232,7 @@ class Applier:
 			(path, value) for path, value in changes
 			if path not in (PATH_STRUCTURAL, PATH_EXISTENCE, PATH_ADD_ADD)
 		]
-		property_changes.sort(key=lambda item: _PRIORITY.get(item[0], _DEFAULT_PRIORITY))
+		property_changes.sort(key=lambda item: _priority(item[0]))
 
 		for path, value in property_changes:
 			if find_applier(path) is None:

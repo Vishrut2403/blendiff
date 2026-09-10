@@ -274,6 +274,52 @@ def _apply_custom_prop(obj: Any, path: str, value: Any, context: Any) -> None:
 	obj[key] = value
 
 
+_POSE_BONE = re.compile(r'^pose\.bones\["(?P<bone>[^"]+)"\]\.(?P<field>\w+)$')
+
+#: Pose-bone fields that can be written back, mapped to their bpy attribute.
+POSE_BONE_ATTRS: dict[str, str] = {
+	"location": "location",
+	"rotation_euler": "rotation_euler",
+	"rotation_quaternion": "rotation_quaternion",
+	"rotation_axis_angle": "rotation_axis_angle",
+	"rotation_mode": "rotation_mode",
+	"scale": "scale",
+}
+
+
+def _apply_pose_bone(obj: Any, path: str, value: Any, context: Any) -> None:
+	"""
+	Write one pose-bone transform.
+
+	Pose transforms are the animator's output and are directly settable, unlike
+	rest bones, which live on the armature datablock and can only be edited in
+	edit mode — see UNSUPPORTED_REASONS.
+	"""
+	match = _POSE_BONE.match(path)
+	if not match:
+		raise ValueError(f"Cannot parse pose bone path {path!r}")
+
+	bone_name = match.group("bone")
+	field = match.group("field")
+
+	attr = POSE_BONE_ATTRS.get(field)
+	if attr is None:
+		raise ValueError(f"Unsupported pose bone property {field!r}")
+
+	pose = getattr(obj, "pose", None)
+	if pose is None:
+		raise ValueError(f"{obj.name!r} has no pose.")
+
+	pose_bone = pose.bones.get(bone_name)
+	if pose_bone is None:
+		raise ValueError(f"{obj.name!r} has no pose bone {bone_name!r}.")
+
+	if attr == "rotation_mode":
+		setattr(pose_bone, attr, str(value))
+	else:
+		setattr(pose_bone, attr, tuple(value))
+
+
 def _apply_camera(obj: Any, path: str, value: Any, context: Any) -> None:
 	key = path.split(".", 1)[1]
 	attr = CAMERA_ATTRS.get(key)
@@ -314,6 +360,7 @@ REGISTRY: tuple[ApplierEntry, ...] = (
 	ApplierEntry(re.compile(r"^material_slots\[\d+\](\.name)?$"), _apply_material_slot, "Material slot"),
 	ApplierEntry(re.compile(r"^parent\.(parent_name|parent_type|parent_bone)$"), _apply_parent, "Parenting"),
 	ApplierEntry(re.compile(r"^custom_props\.[^.]+$"), _apply_custom_prop, "Custom property"),
+	ApplierEntry(_POSE_BONE, _apply_pose_bone, "Pose bone transform"),
 	ApplierEntry(re.compile(r"^camera\.[^.]+$"), _apply_camera, "Camera data"),
 	ApplierEntry(re.compile(r"^light\.[^.]+$"), _apply_light, "Light data"),
 )
@@ -327,6 +374,15 @@ UNSUPPORTED_REASONS: tuple[tuple[re.Pattern, str], ...] = (
 	 "An object's type cannot be changed after creation."),
 	(re.compile(r"^visible_in_viewlayer$"),
 	 "Derived from collection and object visibility; set those instead."),
+	(re.compile(r"^armature\."),
+	 "Rest bones live on the armature datablock and can only be changed in "
+	 "edit mode; adjust the rig by hand."),
+	(re.compile(r'^pose\.bones\["[^"]+"\]\.constraints'),
+	 "Bone constraints are not yet applicable; re-create the constraint manually."),
+	(re.compile(r'^pose\.bones\["[^"]+"\]$'),
+	 "BlenDiff cannot add or remove bones; edit the rig directly."),
+	(re.compile(r"^pose\.bones\.[^.]+\.custom_shape$"),
+	 "Custom shapes reference another object; assign it by hand."),
 	(re.compile(r"^mesh\."),
 	 "Mesh geometry is summarised, not stored — BlenDiff cannot rebuild it."),
 	(re.compile(r"^modifiers\."),

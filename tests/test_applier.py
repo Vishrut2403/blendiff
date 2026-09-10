@@ -472,3 +472,101 @@ class TestNonObjectTargets:
 		result = _apply(proposal)
 		assert result.applied == []
 		assert result.skipped
+
+
+class TestPoseBones:
+	"""
+	Pose transforms are the animator's output and are directly settable, unlike
+	rest bones which live on the armature datablock and need edit mode.
+	"""
+
+	def _rig(self, bpy, bones=("Spine", "Head")):
+		from fake_bpy import FakePose
+		rig = FakeObject("Rig", "ARMATURE")
+		rig.pose = FakePose(bones)
+		bpy.data.objects.add(rig)
+		return rig
+
+	def test_location_applied(self, bpy):
+		rig = self._rig(bpy)
+		_apply(_proposal("Rig", [('pose.bones["Head"].location', [0.0, 1.0, 0.0])]))
+		assert rig.pose.bones["Head"].location == (0.0, 1.0, 0.0)
+
+	def test_rotation_quaternion_applied(self, bpy):
+		rig = self._rig(bpy)
+		_apply(_proposal("Rig", [
+			('pose.bones["Head"].rotation_quaternion', [0.7, 0.7, 0.0, 0.0]),
+		]))
+		assert rig.pose.bones["Head"].rotation_quaternion == (0.7, 0.7, 0.0, 0.0)
+
+	def test_scale_applied(self, bpy):
+		rig = self._rig(bpy)
+		_apply(_proposal("Rig", [('pose.bones["Spine"].scale', [2.0, 2.0, 2.0])]))
+		assert rig.pose.bones["Spine"].scale == (2.0, 2.0, 2.0)
+
+	def test_rotation_mode_applied(self, bpy):
+		rig = self._rig(bpy)
+		_apply(_proposal("Rig", [('pose.bones["Head"].rotation_mode', "XYZ")]))
+		assert rig.pose.bones["Head"].rotation_mode == "XYZ"
+
+	def test_only_the_named_bone_is_touched(self, bpy):
+		rig = self._rig(bpy)
+		_apply(_proposal("Rig", [('pose.bones["Head"].location', [5.0, 0.0, 0.0])]))
+		assert rig.pose.bones["Spine"].location == (0.0, 0.0, 0.0)
+
+	def test_rotation_mode_applied_before_rotation_values(self, bpy):
+		"""
+		Blender reinterprets rotation channels when the mode changes, so the
+		mode must land first. Pose bones carry their own mode per bone, so the
+		ordering rule has to match on the path suffix.
+		"""
+		self._rig(bpy)
+		recorded = []
+		from fake_bpy import FakePoseBone
+		original = FakePoseBone.__setattr__
+
+		def tracking(self, key, value):
+			if key in ("rotation_mode", "rotation_euler"):
+				recorded.append(key)
+			original(self, key, value)
+
+		FakePoseBone.__setattr__ = tracking
+		try:
+			_apply(_proposal("Rig", [
+				('pose.bones["Head"].rotation_euler', [1.0, 0.0, 0.0]),
+				('pose.bones["Head"].rotation_mode', "XYZ"),
+			]))
+		finally:
+			FakePoseBone.__setattr__ = original
+
+		assert recorded.index("rotation_mode") < recorded.index("rotation_euler")
+
+	def test_missing_bone_fails_loudly(self, bpy):
+		self._rig(bpy)
+		result = _apply(_proposal("Rig", [('pose.bones["Ghost"].location', [1, 0, 0])]))
+		assert result.failed and "no pose bone" in result.failed[0].detail
+
+	def test_object_without_pose_fails(self, cube):
+		result = _apply(_proposal("Cube", [('pose.bones["Head"].location', [1, 0, 0])]))
+		assert result.failed and "no pose" in result.failed[0].detail
+
+	def test_rest_bones_are_reported_unappliable(self, bpy):
+		"""Rest data can only be edited in edit mode, so it is informational."""
+		self._rig(bpy)
+		result = _apply(_proposal("Rig", [('armature.bones["Head"].parent', "Spine")]))
+		assert result.applied == []
+		assert "edit mode" in result.skipped[0].detail
+
+	def test_bone_addition_is_reported_unappliable(self, bpy):
+		self._rig(bpy)
+		result = _apply(_proposal("Rig", [('pose.bones["NewBone"]', "NewBone")]))
+		assert result.applied == []
+		assert "cannot add or remove bones" in result.skipped[0].detail
+
+	def test_bone_constraints_reported_unappliable(self, bpy):
+		self._rig(bpy)
+		result = _apply(_proposal("Rig", [
+			('pose.bones["Head"].constraints[0].influence', 0.5),
+		]))
+		assert result.applied == []
+		assert "constraint" in result.skipped[0].detail.lower()
