@@ -143,7 +143,8 @@ The applier registry (`merge_engine/property_appliers.py`) is the single source 
 | Collection membership | Keyframes, drivers, NLA strips |
 | Material slot assignment | Material node graphs |
 | Parenting (world position preserved) | Object type, collection hierarchy |
-| Pose bone transforms | Rest bones (edit-mode only), bone constraints |
+| Pose bone transforms | Bone constraints |
+| Rest bones — parenting, rest pose, roll, flags | Adding or removing bones |
 | Custom properties | Object creation (needs the source file) |
 | Camera and light data | |
 

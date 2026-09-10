@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Merge can now apply rest-bone changes.** Reparenting a bone, moving its
+  rest position and changing its roll were reported as read-only, because those
+  fields exist only on `EditBone` and reaching them means entering edit mode.
+  That constraint rules edit mode out during *extraction* — it runs on every
+  diff, must not disturb the user's mode, and cannot touch a linked rig — but
+  none of it applies when the user has explicitly asked for a merge. Merge now
+  handles a rigger's changes, not just an animator's
+- Rest-bone changes are applied as a **single edit-mode session per object**
+  rather than one attribute at a time, which would be slow on a real rig and
+  would push a stack of undo steps. Fields are written in dependency order,
+  with `use_connect` last because connecting a bone snaps its head onto the
+  parent's tail
+- Mode, active object and selection are restored afterwards. A merge that left
+  an artist in edit mode on an object they had not selected would be
+  disruptive, so this is asserted in both the unit and Blender suites
+- Linked rigs and library overrides are reported with the reason rather than
+  failing, and never enter edit mode
+- Bone flags (`use_deform`, inheritance, envelopes, `hide`) and armature
+  settings (`pose_position`, `display_type`) apply without a mode switch at
+  all — they are writable on `Bone` directly
+
 ## 0.8.0 — 2026-09-10
 
 ### Added
