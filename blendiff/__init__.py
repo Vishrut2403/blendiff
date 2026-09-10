@@ -32,11 +32,11 @@ try:
 except ModuleNotFoundError:
 	_IN_BLENDER = False
 
-# The wheel published to PyPI ships only the pure-Python core; ui/ and
-# extractor/ are excluded because they require bpy. Installing that wheel into
-# Blender's own Python therefore gives an environment where bpy imports but the
-# UI modules do not exist — so the presence of bpy alone is not enough to
-# assume the addon half is available.
+# The UI needs bpy at import time, so it is only available inside Blender.
+# The wheel and the addon zip ship the same code; what differs is that Blender
+# discovers addons in its scripts/addons and extensions directories, not in
+# site-packages — so a pip install inside Blender gives you the code but not an
+# entry in the Add-ons list.
 _UI_AVAILABLE = False
 if _IN_BLENDER:
 	try:
@@ -58,13 +58,25 @@ if _UI_AVAILABLE:
 		panels.unregister()
 		operators.unregister()
 
+elif not _IN_BLENDER:
+
+	def register() -> None:
+		raise RuntimeError(
+			"BlenDiff's UI only runs inside Blender. This looks like a plain "
+			"Python interpreter, where the headless core and extractor are "
+			"available but there is no UI to register."
+		)
+
+	def unregister() -> None:
+		"""No-op: registration never succeeded, so there is nothing to undo."""
+		return
+
 else:
 
 	def register() -> None:
 		raise RuntimeError(
-			"BlenDiff's Blender UI is not installed. The PyPI package ships "
-			"only the headless core; install the addon .zip from the releases "
-			"page to use BlenDiff inside Blender."
+			"BlenDiff's UI modules failed to import. Install the addon .zip "
+			"from the releases page via Edit > Preferences > Add-ons."
 		)
 
 	def unregister() -> None:

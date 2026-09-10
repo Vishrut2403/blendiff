@@ -44,12 +44,18 @@ Repository = "https://github.com/Vishrut2403/blendiff"
 "Bug Tracker" = "https://github.com/Vishrut2403/blendiff/issues"
 
 [tool.hatch.build.targets.wheel]
-# Only ship the pure-Python core — exclude bpy-dependent ui/ and extractor/
+# Ship the whole package, including ui/ and extractor/.
+#
+# The addon zip and the wheel are the same code, differing only in delivery.
+# Excluding modules previously broke a real workflow: `pip install blendiff`
+# into Blender's own Python could not capture snapshots, because extractor/
+# was missing — even though every module in it imports bpy lazily and imports
+# fine without Blender.
+#
+# ui/ does import bpy at module scope, but blendiff/__init__ guards that, so
+# shipping it costs a non-Blender user nothing and lets someone who installed
+# via pip inside Blender call blendiff.register() from the Scripting tab.
 packages = ["blendiff"]
-exclude = [
-    "blendiff/ui",
-    "blendiff/extractor",
-]
 
 [tool.hatch.build.targets.sdist]
 exclude = [
