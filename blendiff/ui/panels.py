@@ -2,6 +2,7 @@ import json
 import bpy
 
 from ..storage.sidecar import SidecarManager
+from .registration import register_classes, unregister_classes
 
 
 # Helpers
@@ -389,10 +390,9 @@ PANELS = [
 
 
 def register():
-	for cls in PANELS:
-		bpy.utils.register_class(cls)
+	register_classes(PANELS)
 
 
 def unregister():
-	for cls in reversed(PANELS):
-		bpy.utils.unregister_class(cls)
+	# Best-effort: one class that is already gone must not strand the rest.
+	unregister_classes(PANELS)

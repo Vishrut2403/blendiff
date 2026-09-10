@@ -20,6 +20,12 @@ from __future__ import annotations
 import json
 import bpy
 
+from .registration import (
+	delete_properties,
+	register_classes,
+	unregister_classes,
+)
+
 from ..storage.sidecar import SidecarManager
 
 
@@ -252,10 +258,18 @@ def register_wm_props():
 	)
 
 
+#: WindowManager properties this panel owns.
+_WM_PROPS = (
+	"blendiff_base_label",
+	"blendiff_a_label",
+	"blendiff_b_label",
+)
+
+
 def unregister_wm_props():
-	del bpy.types.WindowManager.blendiff_base_label
-	del bpy.types.WindowManager.blendiff_a_label
-	del bpy.types.WindowManager.blendiff_b_label
+	# Deleting an already-absent property raised AttributeError, which during
+	# teardown aborted the rest of unregister and leaked the remaining props.
+	delete_properties(bpy.types.WindowManager, _WM_PROPS)
 
 
 # Registration
@@ -267,11 +281,10 @@ PANELS = [
 
 def register():
 	register_wm_props()
-	for cls in PANELS:
-		bpy.utils.register_class(cls)
+	register_classes(PANELS)
 
 
 def unregister():
-	for cls in reversed(PANELS):
-		bpy.utils.unregister_class(cls)
+	# Properties are removed even if class teardown ran into trouble.
+	unregister_classes(PANELS)
 	unregister_wm_props()
