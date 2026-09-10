@@ -20,6 +20,34 @@ from blendiff.storage.sidecar import (
 from blendiff.data_model.schema import SCHEMA_VERSION
 
 
+def _sidecar_of(blend_file):
+	"""
+	Where this .blend's sidecar lives.
+
+	Tests used to hardcode `_sidecar_of(blend_file)`, which
+	baked in the old loose-sibling layout and broke the moment it moved into
+	the .blendiff folder. Asking the manager keeps them layout-agnostic.
+	"""
+	return SidecarManager(blend_file).sidecar_path
+
+
+def _seed_sidecar(blend_file, content):
+	"""
+	Write a sidecar directly, for tests that pre-seed corrupt or legacy data.
+
+	The sidecar now lives in a .blendiff folder that will not exist until
+	something writes one, so the directory has to be created first.
+	"""
+	path = _sidecar_of(blend_file)
+	os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+	with open(path, "w") as f:
+		if isinstance(content, str):
+			f.write(content)
+		else:
+			json.dump(content, f)
+	return path
+
+
 # Fixtures
 
 MOCK_SCENE = {
@@ -89,7 +117,7 @@ class TestEmptyState:
 class TestSaveSnapshot:
 	def test_save_creates_sidecar_file(self, mgr, blend_file):
 		mgr.save_snapshot("Before rigging", "Scene", MOCK_SCENE)
-		expected_path = blend_file.replace(".blend", SIDECAR_EXTENSION)
+		expected_path = _sidecar_of(blend_file)
 		assert os.path.exists(expected_path)
 
 	def test_save_returns_snapshot_with_correct_label(self, mgr):
@@ -124,7 +152,7 @@ class TestSaveSnapshot:
 
 	def test_sidecar_is_valid_json(self, mgr, blend_file):
 		mgr.save_snapshot("Test", "Scene", MOCK_SCENE)
-		sidecar_path = blend_file.replace(".blend", SIDECAR_EXTENSION)
+		sidecar_path = _sidecar_of(blend_file)
 		with open(sidecar_path) as f:
 			data = json.load(f)
 		assert "snapshots" in data
@@ -261,18 +289,14 @@ class TestSnapshotDataclass:
 
 class TestCorruptedSidecar:
 	def test_corrupted_sidecar_returns_empty_list(self, blend_file):
-		sidecar_path = blend_file.replace(".blend", SIDECAR_EXTENSION)
-		with open(sidecar_path, "w") as f:
-			f.write("this is not valid json {{{")
+		_seed_sidecar(blend_file, "this is not valid json {{{")
 
 		mgr = SidecarManager(blend_file)
 		# Should not raise — returns empty
 		assert mgr.list_snapshots() == []
 
 	def test_can_save_after_corruption(self, blend_file):
-		sidecar_path = blend_file.replace(".blend", SIDECAR_EXTENSION)
-		with open(sidecar_path, "w") as f:
-			f.write("corrupted")
+		_seed_sidecar(blend_file, "corrupted")
 
 		mgr = SidecarManager(blend_file)
 		snap = mgr.save_snapshot("Recovery", "Scene", MOCK_SCENE)
@@ -288,7 +312,7 @@ class TestAtomicWrite:
 
 	def test_failed_write_leaves_original_intact(self, mgr, blend_file):
 		mgr.save_snapshot("Good", "Scene", MOCK_SCENE)
-		sidecar_path = blend_file.replace(".blend", SIDECAR_EXTENSION)
+		sidecar_path = _sidecar_of(blend_file)
 		with open(sidecar_path) as f:
 			before = f.read()
 
@@ -325,7 +349,7 @@ class TestAtomicWrite:
 
 	def test_write_upgrades_stored_sidecar_version(self, mgr, blend_file):
 		mgr.save_snapshot("Test", "Scene", MOCK_SCENE)
-		sidecar_path = blend_file.replace(".blend", SIDECAR_EXTENSION)
+		sidecar_path = _sidecar_of(blend_file)
 		with open(sidecar_path) as f:
 			assert json.load(f)["blendiff_version"] == SIDECAR_VERSION
 
@@ -362,15 +386,13 @@ class TestSidecarMigration:
 
 def _downgrade_stored_snapshots(blend_file):
 	"""Strip schema markers from the file, simulating a pre-0.6 sidecar."""
-	sidecar_path = blend_file.replace(".blend", SIDECAR_EXTENSION)
-	with open(sidecar_path) as f:
+	with open(_sidecar_of(blend_file)) as f:
 		data = json.load(f)
 	for snap in data["snapshots"]:
 		snap["data"].pop("schema_version", None)
 		snap["data"].pop("captured_domains", None)
 		snap["data"].pop("transform_space", None)
-	with open(sidecar_path, "w") as f:
-		json.dump(data, f)
+	_seed_sidecar(blend_file, data)
 
 
 # Content-addressed storage
@@ -399,7 +421,7 @@ class TestDeduplication:
 		return data
 
 	def _pool(self, blend_file):
-		with open(blend_file.replace(".blend", SIDECAR_EXTENSION)) as f:
+		with open(_sidecar_of(blend_file)) as f:
 			return json.load(f).get("objects", {})
 
 	def test_repeated_snapshots_do_not_duplicate_objects(self, mgr, blend_file):
@@ -462,8 +484,7 @@ class TestDeduplication:
 
 	def test_legacy_inline_sidecar_is_packed_on_next_write(self, mgr, blend_file):
 		"""A pre-0.3 sidecar must open, and shrink the first time it is saved."""
-		path = blend_file.replace(".blend", SIDECAR_EXTENSION)
-		legacy = {
+		_seed_sidecar(blend_file, {
 			"blendiff_version": "0.2",
 			"blend_file": "scene.blend",
 			"snapshots": [{
@@ -471,9 +492,7 @@ class TestDeduplication:
 				"scene_name": "Scene",
 				"data": self._scene({"Cube": self._obj("Cube")}),
 			}],
-		}
-		with open(path, "w") as f:
-			json.dump(legacy, f)
+		})
 
 		# Readable as-is.
 		assert mgr.list_snapshots()[0].data["objects"]["Cube"]["type"] == "MESH"
@@ -522,11 +541,11 @@ class TestDeduplication:
 		"""End to end: repeated snapshots must not multiply the file size."""
 		scene = self._scene({f"Obj{i}": self._heavy_obj(f"Obj{i}") for i in range(20)})
 		mgr.save_snapshot("first", "Scene", scene)
-		one = os.path.getsize(blend_file.replace(".blend", SIDECAR_EXTENSION))
+		one = os.path.getsize(_sidecar_of(blend_file))
 
 		for i in range(9):
 			mgr.save_snapshot(f"more{i}", "Scene", scene)
-		ten = os.path.getsize(blend_file.replace(".blend", SIDECAR_EXTENSION))
+		ten = os.path.getsize(_sidecar_of(blend_file))
 
 		# Ten identical snapshots pay for one copy of the objects plus nine
 		# sets of references, nowhere near ten full copies.
@@ -536,14 +555,15 @@ class TestDeduplication:
 		"""Changing one object of twenty must not rewrite the other nineteen."""
 		objects = {f"Obj{i}": self._heavy_obj(f"Obj{i}") for i in range(20)}
 		mgr.save_snapshot("before", "Scene", self._scene(objects))
-		one = os.path.getsize(blend_file.replace(".blend", SIDECAR_EXTENSION))
+		one = os.path.getsize(_sidecar_of(blend_file))
 
 		edited = dict(objects)
 		edited["Obj0"] = {**self._heavy_obj("Obj0"), "moved": True}
 		mgr.save_snapshot("after", "Scene", self._scene(edited))
-		two = os.path.getsize(blend_file.replace(".blend", SIDECAR_EXTENSION))
+		two = os.path.getsize(_sidecar_of(blend_file))
 
 		# The second snapshot adds one object plus a reference map, so growth
 		# should be a small fraction of a full second copy.
 		growth = (two - one) / one
 		assert growth < 0.35, f"second snapshot grew the file by {growth:.0%}"
+
