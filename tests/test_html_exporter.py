@@ -229,9 +229,20 @@ class TestExportToFile:
 # build_output_path
 
 class TestBuildOutputPath:
-	def test_output_in_same_dir_as_blend(self):
+	def test_output_is_not_in_the_project_directory(self):
+		"""
+		Reports are timestamped and accumulate one per export. Defaulting them
+		beside the .blend slowly filled the artist's project directory with
+		files they never chose to keep there.
+		"""
 		path = build_output_path("/myspace/scene.blend", "Before rigging")
-		assert path.startswith("/myspace/")
+		assert not path.startswith("/myspace/")
+
+	def test_output_directory_can_be_chosen(self):
+		path = build_output_path(
+			"/myspace/scene.blend", "Before rigging", directory="/somewhere/else"
+		)
+		assert path.startswith("/somewhere/else/")
 
 	def test_output_is_html(self):
 		path = build_output_path("/myspace/scene.blend", "Before rigging")

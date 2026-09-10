@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from datetime import datetime
 
 
@@ -246,25 +247,48 @@ def export_to_file(
 		snapshot_label=snapshot_label,
 		blend_filename=blend_filename,
 	)
+	# build_output_path now nests reports, and a user-chosen path may point
+	# anywhere, so the directory is not guaranteed to exist.
+	directory = os.path.dirname(os.path.abspath(output_path))
+	os.makedirs(directory, exist_ok=True)
+
 	with open(output_path, "w", encoding="utf-8") as f:
 		f.write(html)
 	return output_path
 
 
-def build_output_path(blend_filepath: str, snapshot_label: str) -> str:
+def build_output_filename(blend_filepath: str, snapshot_label: str) -> str:
 	"""
-	Derive the default output HTML path from the blend file path and
-	snapshot label.
+	Derive a report filename from the .blend name and snapshot label.
 
 	Example:
 		/myspace/scene.blend + "Before rigging"
-		→ /myspace/scene_Before_rigging_20260413_143000.html
+		→ scene_Before_rigging_20260413_143000.html
 	"""
-	base_dir = os.path.dirname(blend_filepath)
 	blend_name = os.path.splitext(os.path.basename(blend_filepath))[0]
 	safe_label = "".join(c if c.isalnum() or c in "-_" else "_" for c in snapshot_label)
 	timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-	filename = f"{blend_name}_{safe_label}_{timestamp}.html"
+	return f"{blend_name}_{safe_label}_{timestamp}.html"
+
+
+def build_output_path(
+	blend_filepath: str,
+	snapshot_label: str,
+	directory: str | None = None,
+) -> str:
+	"""
+	Suggest where a report should be written.
+
+	Reports are timestamped, so one accumulates per export. Defaulting them
+	beside the .blend meant a project directory slowly filled with report
+	files the artist never asked to keep there — so the default is the system
+	temporary directory instead, and the export operator opens a file browser
+	so the destination is always a deliberate choice.
+
+	Pass ``directory`` to place the report somewhere specific.
+	"""
+	filename = build_output_filename(blend_filepath, snapshot_label)
+	base_dir = directory if directory is not None else tempfile.gettempdir()
 	return os.path.join(base_dir, filename)
 
 

@@ -51,9 +51,22 @@ def section(name):
 	print(f"\n-- {name} --")
 
 
+from blendiff.storage.sidecar import SidecarManager
+
+
+def sidecar_for(blend_path):
+	"""
+	Where this .blend's sidecar lives.
+
+	Hardcoding the layout baked in the old loose-sibling location and broke
+	the moment history moved into the .blendiff folder.
+	"""
+	return SidecarManager(blend_path).sidecar_path
+
+
 WORKDIR = tempfile.mkdtemp(prefix="blendiff-manual-")
 BLEND = os.path.join(WORKDIR, "shot.blend")
-SIDECAR = os.path.join(WORKDIR, "shot.blendiff")
+SIDECAR = sidecar_for(BLEND)
 
 
 def new_scene():
@@ -178,11 +191,20 @@ except Exception as exc:
 	print(f"R    export_html raised: {type(exc).__name__}: {exc}")
 check("export_html runs", ran)
 
-produced = [f for f in os.listdir(WORKDIR) if f.endswith(".html")]
-print(f"R    workdir contents: {sorted(os.listdir(WORKDIR))}")
-check("html file produced", bool(produced), str(produced))
+# Reports default to the system temp directory now, deliberately not the
+# project folder — the file browser lets the user put them anywhere.
+reports_dir = tempfile.gettempdir()
+produced = [
+	f for f in os.listdir(reports_dir)
+	if f.endswith(".html") and f.startswith("shot_")
+]
+print(f"    workdir: {sorted(os.listdir(WORKDIR))}")
+check("html file produced", bool(produced), str(produced[:1]))
+check("project directory stays clean",
+      not [f for f in os.listdir(WORKDIR) if f.endswith(".html")],
+      f"workdir: {sorted(os.listdir(WORKDIR))}")
 if produced:
-	with open(os.path.join(WORKDIR, produced[0])) as f:
+	with open(os.path.join(reports_dir, produced[0])) as f:
 		html = f.read()
 	check("html is self-contained", "<style" in html and "<script" in html,
 		  f"{len(html)} bytes")
@@ -256,13 +278,14 @@ if raw:
 # 7. Snapshot deletion
 
 section("Snapshot management")
-with open(os.path.join(WORKDIR, "merge.blendiff")) as f:
+merge_sidecar = sidecar_for(os.path.join(WORKDIR, "merge.blend"))
+with open(merge_sidecar) as f:
 	mside = json.load(f)
 count_before = len(mside["snapshots"])
 target = mside["snapshots"][0]["id"]
 res = bpy.ops.blendiff.delete_snapshot('EXEC_DEFAULT', snapshot_id=target)
 check("delete_snapshot runs", res == {"FINISHED"}, str(res))
-with open(os.path.join(WORKDIR, "merge.blendiff")) as f:
+with open(merge_sidecar) as f:
 	mside = json.load(f)
 check("snapshot removed", len(mside["snapshots"]) == count_before - 1,
 	  f"{count_before} -> {len(mside['snapshots'])}")
@@ -358,7 +381,7 @@ def draw_panel(panel_cls, context):
 
 WORKDIR = tempfile.mkdtemp(prefix="blendiff-panels-")
 BLEND = os.path.join(WORKDIR, "scene.blend")
-SIDECAR = os.path.join(WORKDIR, "scene.blendiff")
+SIDECAR = sidecar_for(BLEND)
 
 
 bpy.ops.wm.read_factory_settings(use_empty=True)
