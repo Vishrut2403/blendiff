@@ -399,18 +399,76 @@ def test_rename_inside_an_unsaved_session_is_a_known_limit():
 
 
 @test
-def test_stamping_marks_the_file_modified():
-	"""Otherwise the user is never prompted to save and the stamps evaporate."""
+def test_stamping_triggers_the_modified_marker():
+	"""
+	Stamping must flag the file as changed, or the user is never prompted to
+	save and the stamps evaporate on close.
+
+	This asserts the *call*, not bpy.data.is_dirty, because that flag's state
+	straight after save_as_mainfile differs between Blender versions — it is
+	False on 5.1 and True on 4.2 in background mode — which made an earlier
+	version of this test fail on its own precondition rather than on the
+	behaviour it exists to check.
+	"""
 	import tempfile
+
+	from blendiff.extractor import identity
 
 	reset_scene()
 	add_mesh("Cube")
 	path = os.path.join(tempfile.mkdtemp(), "dirty.blend")
 	bpy.ops.wm.save_as_mainfile(filepath=path)
-	check(not bpy.data.is_dirty, "freshly saved file starts clean")
+
+	calls = []
+	original = identity._mark_file_modified
+	identity._mark_file_modified = lambda: calls.append(True)
+	try:
+		stamped = identity.stamp_scene(bpy.context.scene)
+	finally:
+		identity._mark_file_modified = original
+
+	check(stamped >= 1, "a fresh object should be stamped")
+	check_eq(len(calls), 1, "stamping must mark the file modified exactly once")
+
+
+@test
+def test_no_marker_when_nothing_needed_stamping():
+	"""An unchanged file must not be flagged modified for no reason."""
+	from blendiff.extractor import identity
+
+	reset_scene()
+	add_mesh("Cube")
+	identity.stamp_scene(bpy.context.scene)     # everything now stamped
+
+	calls = []
+	original = identity._mark_file_modified
+	identity._mark_file_modified = lambda: calls.append(True)
+	try:
+		stamped = identity.stamp_scene(bpy.context.scene)
+	finally:
+		identity._mark_file_modified = original
+
+	check_eq(stamped, 0, "nothing left to stamp")
+	check_eq(calls, [], "must not flag the file modified when nothing changed")
+
+
+@test
+def test_file_is_dirty_after_stamping():
+	"""
+	The observable consequence, asserted as a postcondition only.
+
+	The starting state of is_dirty is version-dependent, so this checks where
+	it ends up rather than that it transitioned.
+	"""
+	import tempfile
+
+	reset_scene()
+	add_mesh("Cube")
+	path = os.path.join(tempfile.mkdtemp(), "dirty2.blend")
+	bpy.ops.wm.save_as_mainfile(filepath=path)
 
 	capture_snapshot(path, "stamp")
-	check(bpy.data.is_dirty, "stamping must mark the file as having changes")
+	check(bpy.data.is_dirty, "file must report unsaved changes after stamping")
 
 
 @test
