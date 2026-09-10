@@ -249,6 +249,29 @@ class SidecarManager:
 								return True
 				return False
 
+		def latest_object_ids(self) -> dict:
+				"""
+				Object name to identity, from the most recent snapshot.
+
+				The stamps themselves live in the .blend, but a user who
+				snapshots and closes without saving loses them. This makes the
+				sidecar the durable record so identity — and therefore rename
+				tracking — survives that.
+				"""
+				snapshots = self.list_snapshots()
+				if not snapshots:
+						return {}
+
+				objects = snapshots[0].data.get("objects", {})
+				if not isinstance(objects, dict):
+						return {}
+
+				return {
+						name: obj["blendiff_id"]
+						for name, obj in objects.items()
+						if isinstance(obj, dict) and isinstance(obj.get("blendiff_id"), str)
+				}
+
 		def snapshot_count(self) -> int:
 				data = self._load_raw()
 				return len(data.get("snapshots", []))

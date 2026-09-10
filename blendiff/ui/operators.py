@@ -1,4 +1,6 @@
 import json
+import os
+
 import bpy
 
 from ..extractor.scene_extractor import SceneExtractor
@@ -8,13 +10,39 @@ from ..data_model.scene import SerializedScene
 from ..storage.sidecar import SidecarManager
 from ..merge_engine.merge_engine import MergeEngine
 from ..export.diff_result import diff_to_dict
+from .registration import register_classes, unregister_classes
 
 
 # Helpers
 
+def _orphaned_history_warning(context, mgr) -> str | None:
+	"""
+	Detect a .blend that has been separated from its sidecar.
+
+	Objects keep their BlenDiff id inside the .blend, so stamps present with no
+	sidecar beside the file proves history existed and is not here — almost
+	always a .blend moved or renamed without its .blendiff. Reporting that is
+	the difference between "you have no snapshots yet" and "your snapshots are
+	in the folder you moved this from", which otherwise look identical.
+	"""
+	from ..extractor.identity import scene_has_identities
+
+	if mgr.sidecar_path and os.path.exists(mgr.sidecar_path):
+		return None
+	if not scene_has_identities(context.scene):
+		return None
+
+	return (
+		"BlenDiff: this file has snapshot history, but no "
+		f"{os.path.basename(mgr.sidecar_path or '.blendiff')} was found beside "
+		"it. If you moved or renamed the .blend, bring its .blendiff along."
+	)
+
+
 def _extract_current_scene(
 	context,
 	stamp_identity: bool = False,
+	known_ids: dict | None = None,
 ) -> tuple[dict, str]:
 	"""
 	Serialise the current scene.
@@ -26,7 +54,9 @@ def _extract_current_scene(
 	"""
 	extractor = SceneExtractor()
 	serializer = SceneSerializer()
-	raw = extractor.extract(context, stamp_identity=stamp_identity)
+	raw = extractor.extract(
+		context, stamp_identity=stamp_identity, known_ids=known_ids,
+	)
 	scene: SerializedScene = serializer.serialize(raw)
 	return scene, context.scene.name
 
@@ -140,14 +170,22 @@ class BLENDIFF_OT_SaveSnapshot(bpy.types.Operator):
 			)
 			return {"CANCELLED"}
 
+		warning = _orphaned_history_warning(context, mgr)
+		if warning:
+			self.report({"WARNING"}, warning)
+
 		label = self.label.strip() or f"Snapshot {mgr.snapshot_count() + 1}"
 
 		try:
 			# Capture is the one moment BlenDiff may write to the .blend:
 			# stamping identities here is what lets later snapshots survive
-			# a rename.
+			# a rename. Ids from the previous snapshot are reused where an
+			# object has lost its stamp, so identity survives a session that
+			# was closed without saving.
 			scene_dict, scene_name = _extract_current_scene(
-				context, stamp_identity=True,
+				context,
+				stamp_identity=True,
+				known_ids=mgr.latest_object_ids(),
 			)
 			snap = mgr.save_snapshot(label, scene_name, scene_dict)
 			self.report({"INFO"}, f"BlenDiff: Saved snapshot '{snap.label}' ({snap.id[:8]})")
@@ -228,6 +266,28 @@ class BLENDIFF_OT_ExportHTML(bpy.types.Operator):
 	bl_label = "Export HTML Report"
 	bl_description = "Save the diff result as a shareable HTML file"
 
+	# Reports are timestamped, so exporting repeatedly used to fill the
+	# project directory with files the artist never chose to keep there.
+	# Asking where to save makes it a deliberate act, like every other
+	# export in Blender.
+	filepath: bpy.props.StringProperty(subtype="FILE_PATH")
+	filter_glob: bpy.props.StringProperty(default="*.html", options={"HIDDEN"})
+
+	def invoke(self, context, event):
+		if "blendiff_result" not in context.window_manager:
+			self.report({"ERROR"}, "BlenDiff: No diff result to export. Run a diff first.")
+			return {"CANCELLED"}
+		if not bpy.data.filepath:
+			self.report({"ERROR"}, "BlenDiff: Please save your .blend file first.")
+			return {"CANCELLED"}
+
+		from ..export.html_exporter import build_output_path
+
+		label = context.window_manager.get("blendiff_active_snapshot_label", "Snapshot")
+		self.filepath = build_output_path(bpy.data.filepath, label)
+		context.window_manager.fileselect_add(self)
+		return {"RUNNING_MODAL"}
+
 	def execute(self, context):
 		wm = context.window_manager
 
@@ -245,7 +305,11 @@ class BLENDIFF_OT_ExportHTML(bpy.types.Operator):
 			result = json.loads(wm["blendiff_result"])
 			snapshot_label = wm.get("blendiff_active_snapshot_label", "Snapshot")
 
-			output_path = build_output_path(bpy.data.filepath, snapshot_label)
+			# Set by the file browser; falls back to the suggested path when
+			# the operator is run directly, as scripts and tests do.
+			output_path = self.filepath or build_output_path(
+				bpy.data.filepath, snapshot_label
+			)
 			export_to_file(
 				result=result,
 				snapshot_label=snapshot_label,
@@ -546,10 +610,8 @@ OPERATORS = [
 
 
 def register():
-	for cls in OPERATORS:
-		bpy.utils.register_class(cls)
+	register_classes(OPERATORS)
 
 
 def unregister():
-	for cls in reversed(OPERATORS):
-		bpy.utils.unregister_class(cls)
+	unregister_classes(OPERATORS)

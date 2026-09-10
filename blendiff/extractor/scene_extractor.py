@@ -29,7 +29,12 @@ class SceneExtractor:
 	# Public API
 
 	@classmethod
-	def extract(cls, context: Any, stamp_identity: bool = False) -> dict:
+	def extract(
+		cls,
+		context: Any,
+		stamp_identity: bool = False,
+		known_ids: dict | None = None,
+	) -> dict:
 		"""
 		Extract the active scene into a plain, JSON-ready dict.
 
@@ -43,6 +48,10 @@ class SceneExtractor:
 			reserved for snapshot capture — an action the user explicitly asked
 			for. A read-only diff leaves this False and simply records whichever
 			ids already exist.
+		known_ids:
+			Object name to identity from the most recent snapshot, used to
+			recover ids for objects that lost theirs because the .blend was
+			closed without saving. See identity.stamp_scene.
 		"""
 		import bpy  # local import keeps module importable outside Blender
 
@@ -51,7 +60,7 @@ class SceneExtractor:
 
 		if stamp_identity:
 			try:
-				stamped = stamp_scene(scene)
+				stamped = stamp_scene(scene, known_ids)
 				if stamped:
 					log.info("Stamped %d object(s) with a BlenDiff identity.", stamped)
 			except Exception as exc:

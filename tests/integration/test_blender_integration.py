@@ -111,7 +111,7 @@ class TestBlenderIntegration:
 		drop in count is worth failing over rather than quietly accepting.
 		"""
 		total = suite_result["passed"] + suite_result["failed"]
-		assert total >= 55, f"integration suite unexpectedly small: {total} tests"
+		assert total >= 60, f"integration suite unexpectedly small: {total} tests"
 
 
 @pytest.fixture(scope="module")

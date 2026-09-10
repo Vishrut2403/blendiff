@@ -117,15 +117,79 @@ def ensure_id(obj: Any, stamp: bool = False) -> Optional[str]:
 	return value
 
 
-def stamp_scene(scene: Any) -> int:
+def scene_has_identities(scene: Any) -> bool:
+	"""
+	True when any object in the scene carries a BlenDiff id.
+
+	Used to tell "this file has never been snapshotted" apart from "this file
+	has history that is not in this folder" — a .blend moved away from its
+	sidecar still carries the stamps, so their presence proves history existed.
+	"""
+	try:
+		return any(read_id(obj) is not None for obj in scene.objects)
+	except Exception:  # pragma: no cover — defensive
+		return False
+
+
+def _mark_file_modified() -> None:
+	"""
+	Flag the .blend as having unsaved changes.
+
+	Writing a custom property through Python does *not* set Blender's dirty
+	flag, so a freshly stamped file looked saved and the user was never
+	prompted. Closing then discarded the stamps, and the next session minted
+	new ones that matched nothing in the stored snapshots — silently reducing
+	rename tracking to the name matching it exists to replace.
+	"""
+	try:
+		import bpy
+
+		bpy.ops.ed.undo_push(message="BlenDiff: stamp object identities")
+	except Exception as exc:
+		# Background and restricted contexts cannot push undo steps. The
+		# sidecar fallback in stamp_scene keeps identity working anyway.
+		log.debug("Could not mark the file modified after stamping: %s", exc)
+
+
+def stamp_scene(scene: Any, known_ids: Optional[dict] = None) -> int:
 	"""
 	Ensure every stampable object in a scene carries an id.
 
-	Returns the number of objects newly stamped. Called when the user captures
-	a snapshot, so that identity exists from the first snapshot onwards.
+	Parameters
+	----------
+	scene:
+		A ``bpy.types.Scene``.
+	known_ids:
+		Object name to identity, taken from the most recent snapshot. An
+		unstamped object whose name appears here reuses that id instead of
+		minting a new one.
+
+		This is what makes identity survive a session in which the user never
+		saved the .blend. The stamps live in the .blend, but the *sidecar* is
+		the durable record, so it can restore continuity that an unsaved file
+		would otherwise lose. Matching by name is imperfect — an object renamed
+		in an unsaved session gets the wrong id — but reusing a plausible id
+		beats minting a random one, which is guaranteed to match nothing.
+
+	Returns the number of objects newly stamped.
 	"""
+	known_ids = known_ids or {}
 	stamped = 0
+
 	for obj in scene.objects:
-		if read_id(obj) is None and ensure_id(obj, stamp=True) is not None:
+		if read_id(obj) is not None:
+			continue
+		if not is_stampable(obj):
+			continue
+
+		recovered = known_ids.get(obj.name)
+		value = recovered if isinstance(recovered, str) and recovered else new_id()
+		try:
+			obj[ID_KEY] = value
 			stamped += 1
+		except Exception as exc:
+			log.warning("Could not stamp identity on %r: %s", obj.name, exc)
+
+	if stamped:
+		_mark_file_modified()
 	return stamped

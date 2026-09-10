@@ -105,6 +105,23 @@ def extract_and_serialize(stamp=False):
 	return SceneSerializer().serialize(raw)
 
 
+def capture_snapshot(blend_path, label):
+	"""
+	What the Save Snapshot operator does, without needing the addon registered.
+
+	Identities are recovered from the previous snapshot, which is precisely
+	what the tests below are checking.
+	"""
+	from blendiff.storage.sidecar import SidecarManager
+
+	manager = SidecarManager(blend_path)
+	raw = SceneExtractor.extract(
+		bpy.context, stamp_identity=True, known_ids=manager.latest_object_ids(),
+	)
+	scene = SceneSerializer().serialize(raw)
+	return manager.save_snapshot(label, bpy.context.scene.name, scene)
+
+
 # Schema and structure
 
 @test
@@ -289,6 +306,162 @@ def test_stamp_scene_reports_count():
 
 
 # Collections
+
+@test
+def test_identity_survives_a_session_closed_without_saving():
+	"""
+	Stamps live in the .blend, but writing a custom property does not mark the
+	file dirty, so a user who snapshots and closes loses them. Identity is
+	recovered from the previous snapshot, making the sidecar the durable
+	record — without this, rename tracking silently degraded to the name
+	matching it exists to replace.
+	"""
+	import tempfile
+
+	reset_scene()
+	add_mesh("Cube")
+	path = os.path.join(tempfile.mkdtemp(), "identity.blend")
+	bpy.ops.wm.save_as_mainfile(filepath=path)
+
+	capture_snapshot(path, "first")
+	first = bpy.data.objects["Cube"].get("_blendiff_id")
+	check(first is not None, "capture must stamp an identity")
+
+	# Reopen without saving: the stamp is gone from the file.
+	bpy.ops.wm.open_mainfile(filepath=path)
+	check(bpy.data.objects["Cube"].get("_blendiff_id") is None,
+	      "stamp should not have persisted without a save")
+
+	capture_snapshot(path, "second")
+	second = bpy.data.objects["Cube"].get("_blendiff_id")
+	check_eq(second, first, "identity must be recovered from the last snapshot")
+
+
+@test
+def test_rename_survives_a_session_boundary():
+	"""
+	The normal path now that stamping marks the file dirty: the user is
+	prompted, saves, and identity persists in the .blend across sessions.
+	"""
+	import tempfile
+
+	reset_scene()
+	add_mesh("Cube")
+	path = os.path.join(tempfile.mkdtemp(), "rename.blend")
+	bpy.ops.wm.save_as_mainfile(filepath=path)
+	capture_snapshot(path, "before")
+
+	# Saving is what the dirty flag now prompts for.
+	bpy.ops.wm.save_mainfile()
+	bpy.ops.wm.open_mainfile(filepath=path)
+
+	bpy.data.objects["Cube"].name = "Body_LOW"
+	capture_snapshot(path, "after")
+
+	from blendiff.storage.sidecar import SidecarManager
+	snaps = {s.label: s for s in SidecarManager(path).list_snapshots()}
+	diff = DiffEngine().compare(snaps["before"].data, snaps["after"].data)
+
+	check_eq(len(diff.renamed_objects), 1,
+	         f"rename must survive the session, got {diff.summary()}")
+
+
+@test
+def test_rename_inside_an_unsaved_session_is_a_known_limit():
+	"""
+	Recovery matches the previous snapshot by name, so an object both renamed
+	*and* left unsaved has nothing linking it to its old identity — it reads
+	as an add plus a remove.
+
+	This is the honest floor of the approach, asserted so the limit stays
+	visible rather than being discovered later as a surprise.
+	"""
+	import tempfile
+
+	reset_scene()
+	add_mesh("Cube")
+	path = os.path.join(tempfile.mkdtemp(), "unsaved_rename.blend")
+	bpy.ops.wm.save_as_mainfile(filepath=path)
+	capture_snapshot(path, "before")
+
+	bpy.ops.wm.open_mainfile(filepath=path)      # stamps discarded
+	bpy.data.objects["Cube"].name = "Body_LOW"
+	capture_snapshot(path, "after")
+
+	from blendiff.storage.sidecar import SidecarManager
+	snaps = {s.label: s for s in SidecarManager(path).list_snapshots()}
+	diff = DiffEngine().compare(snaps["before"].data, snaps["after"].data)
+
+	check_eq(len(diff.renamed_objects), 0,
+	         "a rename with no stamp and no matching name cannot be recovered")
+	check_eq(len(diff.added_objects), 1, "reads as an addition")
+	check_eq(len(diff.removed_objects), 1, "and a removal")
+
+
+@test
+def test_stamping_marks_the_file_modified():
+	"""Otherwise the user is never prompted to save and the stamps evaporate."""
+	import tempfile
+
+	reset_scene()
+	add_mesh("Cube")
+	path = os.path.join(tempfile.mkdtemp(), "dirty.blend")
+	bpy.ops.wm.save_as_mainfile(filepath=path)
+	check(not bpy.data.is_dirty, "freshly saved file starts clean")
+
+	capture_snapshot(path, "stamp")
+	check(bpy.data.is_dirty, "stamping must mark the file as having changes")
+
+
+@test
+def test_orphaned_history_is_reported():
+	"""
+	A .blend moved away from its sidecar keeps its stamps, so their presence
+	proves history existed. Without this the user sees an empty snapshot list,
+	indistinguishable from never having taken one.
+	"""
+	import tempfile
+
+	from blendiff.extractor.identity import scene_has_identities
+	from blendiff.storage.sidecar import SidecarManager
+	import blendiff.ui.operators as operators
+
+	reset_scene()
+	add_mesh("Cube")
+	original = os.path.join(tempfile.mkdtemp(), "orphan.blend")
+	bpy.ops.wm.save_as_mainfile(filepath=original)
+	capture_snapshot(original, "v1")
+
+	# Save the stamped file into a new folder, leaving the sidecar behind.
+	moved = os.path.join(tempfile.mkdtemp(), "orphan.blend")
+	bpy.ops.wm.save_as_mainfile(filepath=moved)
+	bpy.ops.wm.open_mainfile(filepath=moved)
+
+	manager = SidecarManager(moved)
+	check(scene_has_identities(bpy.context.scene), "moved file keeps its stamps")
+	check(not os.path.exists(manager.sidecar_path), "sidecar was left behind")
+
+	warning = operators._orphaned_history_warning(bpy.context, manager)
+	check(warning is not None, "an orphaned sidecar must be reported")
+	check(".blendiff" in warning, f"warning should name the file: {warning}")
+
+
+@test
+def test_no_warning_for_a_genuinely_new_file():
+	"""An unstamped file has no history, so there is nothing to warn about."""
+	import tempfile
+
+	from blendiff.storage.sidecar import SidecarManager
+	import blendiff.ui.operators as operators
+
+	reset_scene()
+	add_mesh("Cube")
+	path = os.path.join(tempfile.mkdtemp(), "fresh.blend")
+	bpy.ops.wm.save_as_mainfile(filepath=path)
+
+	warning = operators._orphaned_history_warning(bpy.context, SidecarManager(path))
+	check(warning is None, f"unexpected warning on a fresh file: {warning}")
+
 
 @test
 def test_collection_path_is_full_path():
