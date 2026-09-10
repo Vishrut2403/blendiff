@@ -6,7 +6,7 @@ No bpy dependency — fully unit-testable without Blender.
 from __future__ import annotations
 from typing import Any
 
-from blendiff.data_model.diff import PropertyChange, RenderDiff
+from ..data_model.diff import PropertyChange, RenderDiff
 
 _FLOAT_PROPS = {"fps_base", "exposure", "gamma"}
 _EPSILON = 1e-6

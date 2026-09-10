@@ -69,11 +69,23 @@ except ModuleNotFoundError:
 # site-packages — so a pip install inside Blender gives you the code but not an
 # entry in the Add-ons list.
 _UI_AVAILABLE = False
+
+#: Why the UI import failed, kept so register() can say something useful.
+#
+# This used to be discarded. When six modules imported `blendiff.data_model`
+# absolutely, they resolved fine as a legacy addon (where the package really is
+# `blendiff`) and raised ModuleNotFoundError as an extension (where it is
+# `bl_ext.<repo>.blendiff`). The except swallowed that, and register() reported
+# only that the UI "failed to import", which named neither the module nor the
+# cause. Keeping the exception turns a dead end into a one-line diagnosis.
+_UI_IMPORT_ERROR: str = ""
+
 if _IN_BLENDER:
 	try:
 		from .ui import panels, operators, merge_panel
 		_UI_AVAILABLE = True
-	except ImportError:  # pragma: no cover — depends on install shape
+	except ImportError as exc:  # pragma: no cover — depends on install shape
+		_UI_IMPORT_ERROR = f"{type(exc).__name__}: {exc}"
 		_UI_AVAILABLE = False
 
 
@@ -106,8 +118,8 @@ else:
 
 	def register() -> None:
 		raise RuntimeError(
-			"BlenDiff's UI modules failed to import. Install the addon .zip "
-			"from the releases page via Edit > Preferences > Add-ons."
+			"BlenDiff's UI modules failed to import, so there is nothing to "
+			f"register. The underlying error was: {_UI_IMPORT_ERROR}"
 		)
 
 	def unregister() -> None:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Any
 
-from blendiff.data_model.diff import PropertyChange
+from ..data_model.diff import PropertyChange
 
 _EPSILON = 1e-5
 

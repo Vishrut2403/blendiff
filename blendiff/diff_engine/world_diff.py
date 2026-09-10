@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Any
 
-from blendiff.data_model.diff import PropertyChange, WorldDiff
+from ..data_model.diff import PropertyChange, WorldDiff
 
 _EPSILON = 1e-6
 

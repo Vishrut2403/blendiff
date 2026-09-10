@@ -3,6 +3,25 @@
 ## Unreleased
 
 ### Fixed
+- **The extension build did not work when installed as an extension.** Six
+  modules under `diff_engine` imported the package by name, as
+  `from blendiff.data_model.diff import ...`. That resolves for a pip install
+  and for the legacy addon zip, where the package really is `blendiff`, and
+  raises `ModuleNotFoundError` for an extension, where it is
+  `bl_ext.<repository>.blendiff`. Enabling the extension failed with a message
+  that named neither the module nor the cause, because `__init__.py` caught the
+  ImportError and discarded it.
+
+  Those imports are now relative, the discarded exception is kept and reported,
+  and `tests/test_import_shape.py` parses every module for imports that name
+  the package absolutely.
+
+  Nothing caught this before: the unit suite imports the top-level package,
+  where absolute imports are correct by definition, and the in-Blender tests
+  load the source directory rather than an installed extension. It appeared the
+  first time the built zip was installed the way the Extensions Platform
+  installs it.
+
 - **The addon did not appear in Preferences > Add-ons.** `bl_info["version"]`
   was computed from `__version__` rather than written out as a literal tuple.
   Blender never imports an addon to read its `bl_info`: it parses the source

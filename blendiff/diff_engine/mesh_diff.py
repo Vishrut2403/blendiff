@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from blendiff.data_model.diff import PropertyChange
-from blendiff.extractor.geometry_hash import comparable as _hashes_comparable
+from ..data_model.diff import PropertyChange
+from ..extractor.geometry_hash import comparable as _hashes_comparable
 
 _EPSILON = 1e-4  # tolerance for bounding box float comparison
 
