@@ -1096,6 +1096,136 @@ def test_pose_position_toggle_is_detected():
 	      f"pose position toggle expected, got {sorted(paths)}")
 
 
+# Rest-bone merging
+#
+# Rest bones exist only on EditBone, so applying them means entering edit mode.
+# Extraction deliberately avoids that; applying is the opposite situation — the
+# user asked for it, the scene is already being changed, and it runs from an
+# operator where mode switching is legitimate.
+
+def _apply_changes(obj_name, changes):
+	"""Run the Applier over one object's changes and return the result."""
+	from blendiff.data_model.conflict import MergeProposal, NonConflictingChange, ThreeWayDiff
+	from blendiff.merge_engine.applier import Applier
+
+	proposal = MergeProposal(object_name=obj_name)
+	for path, value in changes:
+		proposal.non_conflicting_from_a.append(NonConflictingChange(
+			property_path=path, base_value=None, new_value=value, source="a",
+		))
+	tw = ThreeWayDiff(base_label="base", label_a="A", label_b="B",
+	                  proposals=[proposal])
+	return Applier().apply_all(tw, bpy.context)
+
+
+@test
+def test_rest_bone_reparenting_applies():
+	reset_scene()
+	rig = add_rig(bones=(("Spine", (0, 0, 0), (0, 0, 1), None),
+	                     ("Chest", (0, 0, 1), (0, 0, 2), "Spine"),
+	                     ("Head", (0, 0, 2), (0, 0, 3), "Chest")))
+	bpy.ops.object.mode_set(mode="OBJECT")
+
+	result = _apply_changes("Rig", [('armature.bones["Head"].parent', "Spine")])
+	check(not result.failed, f"reparent should not fail: {result.errors}")
+	check_eq(rig.data.bones["Head"].parent.name, "Spine", "bone reparented")
+
+
+@test
+def test_rest_position_and_roll_apply():
+	reset_scene()
+	rig = add_rig()
+	bpy.ops.object.mode_set(mode="OBJECT")
+
+	result = _apply_changes("Rig", [
+		('armature.bones["Head"].tail_local', [0.0, 0.5, 2.0]),
+		('armature.bones["Head"].roll', math.radians(30)),
+	])
+	check(not result.failed, f"rest edit should not fail: {result.errors}")
+	tail = rig.data.bones["Head"].tail_local
+	check_close(tail[1], 0.5, message="tail moved")
+
+	from blendiff.extractor.armature_extractor import extract_armature_data
+	roll = extract_armature_data(rig)["bones"]["Head"]["roll"]
+	check_close(math.degrees(roll), 30.0, tol=1e-3, message="roll applied")
+
+
+@test
+def test_rest_bone_merge_restores_mode_and_selection():
+	"""
+	The user is mid-task. Leaving them in edit mode on an object they did not
+	select would be a genuinely disruptive thing for a merge to do.
+	"""
+	reset_scene()
+	rig = add_rig()
+	cube = add_mesh("Cube")
+	bpy.ops.object.mode_set(mode="OBJECT")
+
+	bpy.context.view_layer.objects.active = cube
+	cube.select_set(True)
+	rig.select_set(False)
+
+	_apply_changes("Rig", [('armature.bones["Head"].roll', 0.2)])
+
+	check_eq(bpy.context.view_layer.objects.active.name, "Cube", "active restored")
+	check_eq(bpy.context.object.mode, "OBJECT", "mode restored")
+	check(cube.select_get(), "the user's selection is intact")
+	check(not rig.select_get(), "the rig was not selected before the merge")
+
+
+@test
+def test_rest_bone_changes_round_trip_through_a_diff():
+	"""End to end: diff a rig edit, then apply it and get the same rig back."""
+	reset_scene()
+	rig = add_rig()
+	bpy.ops.object.mode_set(mode="OBJECT")
+	before = extract_and_serialize()
+
+	bpy.ops.object.mode_set(mode="EDIT")
+	rig.data.edit_bones["Head"].parent = None
+	rig.data.edit_bones["Head"].tail = (0.0, 0.75, 3.0)
+	bpy.ops.object.mode_set(mode="OBJECT")
+	after = extract_and_serialize()
+
+	diff = DiffEngine().compare(before, after)
+	changes = [
+		(c.property_path, c.new_value)
+		for d in diff.modified_objects for c in d.changes
+		if c.property_path.startswith("armature.bones")
+	]
+	check(changes, "the rig edit must be detected")
+
+	# Put the rig back to "before", then replay the diff onto it.
+	bpy.ops.object.mode_set(mode="EDIT")
+	rig.data.edit_bones["Head"].parent = rig.data.edit_bones["Spine"]
+	rig.data.edit_bones["Head"].tail = (0, 0, 2)
+	bpy.ops.object.mode_set(mode="OBJECT")
+
+	result = _apply_changes("Rig", changes)
+	check(not result.failed, f"replay should not fail: {result.errors}")
+
+	replayed = extract_and_serialize()
+	final = DiffEngine().compare(after, replayed)
+	rest = [c.property_path for d in final.modified_objects for c in d.changes
+	        if c.property_path.startswith("armature.bones")]
+	check(not rest, f"replaying the diff should reproduce the rig, left: {rest}")
+
+
+@test
+def test_bone_flags_apply_without_entering_edit_mode():
+	reset_scene()
+	rig = add_rig()
+	bpy.ops.object.mode_set(mode="OBJECT")
+
+	result = _apply_changes("Rig", [
+		('armature.bones["Head"].use_deform', False),
+		("armature.pose_position", "REST"),
+	])
+	check(not result.failed, f"flags should not fail: {result.errors}")
+	check_eq(rig.data.bones["Head"].use_deform, False, "deform flag applied")
+	check_eq(rig.data.pose_position, "REST", "armature setting applied")
+
+
 # Scene-level
 
 @test

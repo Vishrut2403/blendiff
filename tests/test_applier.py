@@ -480,11 +480,13 @@ class TestPoseBones:
 	rest bones which live on the armature datablock and need edit mode.
 	"""
 
-	def _rig(self, bpy, bones=("Spine", "Head")):
-		from fake_bpy import FakePose
-		rig = FakeObject("Rig", "ARMATURE")
+	def _rig(self, bpy, bones=("Spine", "Head"), armature=False):
+		from fake_bpy import FakeArmature, FakePose
+		rig = FakeObject("Rig", "ARMATURE",
+		                 data=FakeArmature(bones) if armature else None)
 		rig.pose = FakePose(bones)
 		bpy.data.objects.add(rig)
+		bpy.context.view_layer.objects.add(rig)
 		return rig
 
 	def test_location_applied(self, bpy):
@@ -550,12 +552,12 @@ class TestPoseBones:
 		result = _apply(_proposal("Cube", [('pose.bones["Head"].location', [1, 0, 0])]))
 		assert result.failed and "no pose" in result.failed[0].detail
 
-	def test_rest_bones_are_reported_unappliable(self, bpy):
-		"""Rest data can only be edited in edit mode, so it is informational."""
-		self._rig(bpy)
-		result = _apply(_proposal("Rig", [('armature.bones["Head"].parent', "Spine")]))
-		assert result.applied == []
-		assert "edit mode" in result.skipped[0].detail
+	def test_bone_flags_apply_without_edit_mode(self, bpy):
+		"""Deform and inheritance flags are writable on Bone directly."""
+		rig = self._rig(bpy, armature=True)
+		_apply(_proposal("Rig", [('armature.bones["Head"].use_deform', False)]))
+		assert rig.data.bones["Head"].use_deform is False
+		assert bpy.mode_set_calls == [], "no mode switch needed for a flag"
 
 	def test_bone_addition_is_reported_unappliable(self, bpy):
 		self._rig(bpy)
@@ -570,3 +572,163 @@ class TestPoseBones:
 		]))
 		assert result.applied == []
 		assert "constraint" in result.skipped[0].detail.lower()
+
+
+class TestRestBones:
+	"""
+	Rest bones live on EditBone and can only be written in edit mode, so an
+	object's changes are applied as a batch in one session rather than one
+	attribute at a time.
+
+    Mode, active object and selection belong to the user, who is mid-task —
+	leaving them in edit mode on an object they did not pick would be a
+	genuinely disruptive thing for a merge to do.
+	"""
+
+	def _rig(self, bpy, bones=("Spine", "Chest", "Head")):
+		from fake_bpy import FakeArmature
+		rig = FakeObject("Rig", "ARMATURE", data=FakeArmature(bones))
+		bpy.data.objects.add(rig)
+		bpy.context.view_layer.objects.add(rig)
+		edit = rig.data.edit_bones
+		edit["Spine"].tail = (0.0, 0.0, 1.0)
+		edit["Chest"].parent = edit["Spine"]
+		edit["Chest"].head, edit["Chest"].tail = (0.0, 0.0, 1.0), (0.0, 0.0, 2.0)
+		edit["Head"].parent = edit["Chest"]
+		edit["Head"].head, edit["Head"].tail = (0.0, 0.0, 2.0), (0.0, 0.0, 3.0)
+		return rig
+
+	def test_reparenting_applies(self, bpy):
+		rig = self._rig(bpy)
+		_apply(_proposal("Rig", [('armature.bones["Head"].parent', "Spine")]))
+		assert rig.data.edit_bones["Head"].parent.name == "Spine"
+
+	def test_unparenting_applies(self, bpy):
+		rig = self._rig(bpy)
+		_apply(_proposal("Rig", [('armature.bones["Head"].parent', None)]))
+		assert rig.data.edit_bones["Head"].parent is None
+
+	def test_rest_position_applies(self, bpy):
+		rig = self._rig(bpy)
+		_apply(_proposal("Rig", [
+			('armature.bones["Head"].head_local', [0.0, 0.5, 2.0]),
+			('armature.bones["Head"].tail_local', [0.0, 0.5, 3.0]),
+		]))
+		assert rig.data.edit_bones["Head"].head == (0.0, 0.5, 2.0)
+		assert rig.data.edit_bones["Head"].tail == (0.0, 0.5, 3.0)
+
+	def test_roll_applies(self, bpy):
+		rig = self._rig(bpy)
+		_apply(_proposal("Rig", [('armature.bones["Head"].roll', 0.5236)]))
+		assert abs(rig.data.edit_bones["Head"].roll - 0.5236) < 1e-6
+
+	def test_use_connect_applies_last(self, bpy):
+		"""
+		Connecting snaps the head onto the parent's tail, so it must land after
+		the head write — otherwise the two fight and the result depends on
+		dict ordering.
+		"""
+		rig = self._rig(bpy)
+		_apply(_proposal("Rig", [
+			('armature.bones["Head"].use_connect', True),
+			('armature.bones["Head"].head_local', [9.0, 9.0, 9.0]),
+		]))
+		head = rig.data.edit_bones["Head"]
+		assert head.use_connect is True
+		assert head.head == head.parent.tail, "connect must win over the head write"
+
+	def test_one_edit_mode_session_for_many_bones(self, bpy):
+		"""Toggling per property would be slow and would spam the undo stack."""
+		self._rig(bpy)
+		_apply(_proposal("Rig", [
+			('armature.bones["Head"].roll', 0.1),
+			('armature.bones["Chest"].roll', 0.2),
+			('armature.bones["Spine"].roll', 0.3),
+		]))
+		assert bpy.mode_set_calls.count("EDIT") == 1
+
+	def test_mode_is_restored(self, bpy):
+		rig = self._rig(bpy)
+		_apply(_proposal("Rig", [('armature.bones["Head"].roll', 0.1)]))
+		assert rig.mode == "OBJECT"
+		assert bpy.mode_set_calls[-1] == "OBJECT"
+
+	def test_active_object_is_restored(self, bpy):
+		"""The user was working on something else; put it back."""
+		other = FakeObject("Cube")
+		bpy.data.objects.add(other)
+		bpy.context.view_layer.objects.add(other)
+		bpy.context.view_layer.objects.active = other
+
+		self._rig(bpy)
+		_apply(_proposal("Rig", [('armature.bones["Head"].roll', 0.1)]))
+		assert bpy.context.view_layer.objects.active is other
+
+	def test_selection_is_restored(self, bpy):
+		other = FakeObject("Cube")
+		bpy.data.objects.add(other)
+		bpy.context.view_layer.objects.add(other)
+		other.select_set(True)
+		bpy.context.view_layer.objects.active = other
+
+		rig = self._rig(bpy)
+		_apply(_proposal("Rig", [('armature.bones["Head"].roll', 0.1)]))
+		assert other.select_get() is True
+		assert rig.select_get() is False, "the rig was not selected before the merge"
+
+	def test_missing_bone_fails_that_change_only(self, bpy):
+		rig = self._rig(bpy)
+		result = _apply(_proposal("Rig", [
+			('armature.bones["Ghost"].roll', 0.1),
+			('armature.bones["Head"].roll', 0.2),
+		]))
+		assert len(result.failed) == 1 and "not found" in result.failed[0].detail
+		assert abs(rig.data.edit_bones["Head"].roll - 0.2) < 1e-6
+
+	def test_missing_parent_fails(self, bpy):
+		self._rig(bpy)
+		result = _apply(_proposal("Rig", [('armature.bones["Head"].parent', "Ghost")]))
+		assert result.failed and "not found" in result.failed[0].detail
+
+	def test_self_parent_rejected(self, bpy):
+		self._rig(bpy)
+		result = _apply(_proposal("Rig", [('armature.bones["Head"].parent', "Head")]))
+		assert result.failed and "own parent" in result.failed[0].detail
+
+    # Linked rigs
+
+	def test_linked_rig_is_skipped_with_a_reason(self, bpy):
+		"""A linked rig belongs to another file and cannot be edited at all."""
+		rig = self._rig(bpy)
+		rig.library = object()
+
+		result = _apply(_proposal("Rig", [('armature.bones["Head"].roll', 0.1)]))
+		assert result.applied == []
+		assert "linked" in result.skipped[0].detail
+
+	def test_library_override_is_skipped_with_a_reason(self, bpy):
+		rig = self._rig(bpy)
+		rig.override_library = object()
+
+		result = _apply(_proposal("Rig", [('armature.bones["Head"].roll', 0.1)]))
+		assert result.applied == []
+		assert "override" in result.skipped[0].detail
+
+	def test_linked_rig_never_enters_edit_mode(self, bpy):
+		rig = self._rig(bpy)
+		rig.library = object()
+		_apply(_proposal("Rig", [('armature.bones["Head"].roll', 0.1)]))
+		assert "EDIT" not in bpy.mode_set_calls
+
+	def test_rest_and_pose_changes_apply_together(self, bpy):
+		"""A merge usually carries both; neither should block the other."""
+		from fake_bpy import FakePose
+		rig = self._rig(bpy)
+		rig.pose = FakePose(("Spine", "Chest", "Head"))
+
+		_apply(_proposal("Rig", [
+			('armature.bones["Head"].roll', 0.25),
+			('pose.bones["Head"].location', [1.0, 0.0, 0.0]),
+		]))
+		assert abs(rig.data.edit_bones["Head"].roll - 0.25) < 1e-6
+		assert rig.pose.bones["Head"].location == (1.0, 0.0, 0.0)

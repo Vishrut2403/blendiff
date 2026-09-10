@@ -78,6 +78,14 @@ class FakeObject:
 		self._collections: list[FakeCollection] = []
 		# Only armatures have a pose; None everywhere else, matching bpy.
 		self.pose = None
+		self.mode = "OBJECT"
+		self._selected = False
+
+	def select_get(self):
+		return self._selected
+
+	def select_set(self, value):
+		self._selected = bool(value)
 
 	# Blender renames through the `name` property and keeps bpy.data in sync.
 	@property
@@ -162,6 +170,89 @@ class FakePose:
 		self.bones = FakePoseBones(bone_names)
 
 
+class FakeEditBone:
+	"""
+	A bone as seen in edit mode.
+
+	parent, head, tail, roll and use_connect exist only here — that is the
+	whole reason rest-bone merging needs an edit-mode session.
+	"""
+
+	def __init__(self, name, head=(0.0, 0.0, 0.0), tail=(0.0, 0.0, 1.0)):
+		self.name = name
+		self.parent = None
+		self.head = head
+		self.tail = tail
+		self.roll = 0.0
+		self._use_connect = False
+
+	@property
+	def use_connect(self):
+		return self._use_connect
+
+	@use_connect.setter
+	def use_connect(self, value):
+		# Blender snaps a connected bone's head onto its parent's tail.
+		self._use_connect = bool(value)
+		if self._use_connect and self.parent is not None:
+			self.head = self.parent.tail
+
+
+class FakeBone:
+	"""A bone in object mode: flags only, no geometry or hierarchy writes."""
+
+	def __init__(self, name):
+		self.name = name
+		self.use_deform = True
+		self.use_inherit_rotation = True
+		self.inherit_scale = "FULL"
+		self.envelope_distance = 0.25
+		self.envelope_weight = 1.0
+		self.hide = False
+
+
+class FakeBoneMap:
+	def __init__(self, names=()):
+		self._items = {}
+		for name in names:
+			self._items[name] = self._make(name)
+
+	def _make(self, name):
+		return FakeBone(name)
+
+	def get(self, name, default=None):
+		return self._items.get(name, default)
+
+	def __getitem__(self, name):
+		return self._items[name]
+
+	def __contains__(self, name):
+		return name in self._items
+
+	def __iter__(self):
+		return iter(self._items.values())
+
+	def __len__(self):
+		return len(self._items)
+
+
+class FakeEditBoneMap(FakeBoneMap):
+	def _make(self, name):
+		return FakeEditBone(name)
+
+	def new(self, name):
+		self._items[name] = FakeEditBone(name)
+		return self._items[name]
+
+
+class FakeArmature:
+	def __init__(self, bone_names=()):
+		self.bones = FakeBoneMap(bone_names)
+		self.edit_bones = FakeEditBoneMap(bone_names)
+		self.pose_position = "POSE"
+		self.display_type = "OCTAHEDRAL"
+
+
 class FakeSlot:
 	def __init__(self, material=None):
 		self.material = material
@@ -235,6 +326,32 @@ class FakeIDMap:
 		return len(self._items)
 
 
+class FakeViewLayerObjects:
+	"""view_layer.objects: iterable, membership-testable, with an active."""
+
+	def __init__(self):
+		self.active = None
+		self._items: list = []
+
+	def add(self, obj):
+		if obj not in self._items:
+			self._items.append(obj)
+		return obj
+
+	def __iter__(self):
+		return iter(self._items)
+
+	def __contains__(self, key):
+		if isinstance(key, str):
+			return any(o.name == key for o in self._items)
+		return key in self._items
+
+
+class FakeViewLayer:
+	def __init__(self):
+		self.objects = FakeViewLayerObjects()
+
+
 class FakeScene:
 	def __init__(self, name="Scene"):
 		self.name = name
@@ -253,6 +370,32 @@ class FakeBpyData:
 class FakeContext:
 	def __init__(self, scene: FakeScene):
 		self.scene = scene
+		self.view_layer = FakeViewLayer()
+
+	@property
+	def object(self):
+		return self.view_layer.objects.active
+
+
+class FakeModeSetOp:
+	"""
+	bpy.ops.object.mode_set, which acts on the *active* object only.
+
+	Recording the sequence lets tests assert that a merge left the user where
+	it found them rather than stranded in edit mode on someone else's object.
+	"""
+
+	def __init__(self, module):
+		self._module = module
+		self.calls: list = []
+
+	def __call__(self, mode="OBJECT", **kwargs):
+		active = self._module.context.view_layer.objects.active
+		self.calls.append(mode)
+		if active is None:
+			raise RuntimeError("mode_set(): no active object")
+		active.mode = mode
+		return {"FINISHED"}
 
 
 _DATA = FakeBpyData()
@@ -272,6 +415,12 @@ def install(scene: Optional[FakeScene] = None) -> types.ModuleType:
 	module.data = _DATA
 	module.context = FakeContext(scene)
 	module.app = types.SimpleNamespace(version_string="4.1.0", version=(4, 1, 0))
+
+	mode_set = FakeModeSetOp(module)
+	module.ops = types.SimpleNamespace(
+		object=types.SimpleNamespace(mode_set=mode_set),
+	)
+	module.mode_set_calls = mode_set.calls
 
 	sys.modules["bpy"] = module
 	return module
