@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.8.2 (2026-09-11)
+
+### Fixed
+- **The GPL text was not shipped with the addon.** The manifest declared
+  `SPDX:GPL-3.0-or-later`, which is what the Extensions Platform checks, but
+  declaring a licence is not the same as conveying it. GPL-3.0 section 4
+  requires every recipient to receive a copy of the licence along with the
+  program, and the extension zip is built from the `blendiff/` directory alone,
+  so the LICENSE at the repository root reached nobody who installed the addon.
+  A copy now lives inside the package, and `tests/test_manifest.py` keeps it
+  present and identical to the root one.
+
 ## 0.8.1 (2026-09-11)
 
 ### Fixed

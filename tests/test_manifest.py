@@ -159,3 +159,27 @@ class TestBlInfoIsParseableWithoutImporting:
 
 	def test_parsed_bl_info_matches_imported(self, parsed_bl_info):
 		assert parsed_bl_info == blendiff.bl_info
+
+
+class TestLicenseTextIsShipped:
+
+	@staticmethod
+	def _read(*parts):
+		path = os.path.join(os.path.dirname(__file__), "..", *parts)
+		with open(path, encoding="utf-8") as handle:
+			return handle.read()
+
+	def test_license_ships_inside_the_package(self):
+		text = self._read("blendiff", "LICENSE")
+		assert "GNU GENERAL PUBLIC LICENSE" in text
+		assert "Version 3" in text
+
+	def test_packaged_license_matches_the_repository_root(self):
+		assert self._read("blendiff", "LICENSE") == self._read("LICENSE"), (
+			"blendiff/LICENSE has drifted from the root LICENSE; they must be "
+			"the same text"
+		)
+
+	def test_license_is_not_excluded_from_the_build(self, manifest):
+		patterns = manifest.get("build", {}).get("paths_exclude_pattern", [])
+		assert not any("LICENSE" in p.upper() for p in patterns)
