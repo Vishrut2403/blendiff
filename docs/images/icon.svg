@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+<rect width="256" height="256" rx="56" fill="#17171A"/>
+<g clip-path="url(#L)"><g transform="translate(-16,0)"><polygon points="128.0,62.0 185.2,95.0 185.2,161.0 128.0,194.0 70.8,161.0 70.8,95.0" fill="none" stroke="#6F6F7A" stroke-width="11" stroke-linejoin="round" opacity="1.0"/><line x1="128" y1="128" x2="128.0" y2="62.0" stroke="#6F6F7A" stroke-width="11" stroke-linecap="round" opacity="1.0"/><line x1="128" y1="128" x2="185.2" y2="161.0" stroke="#6F6F7A" stroke-width="11" stroke-linecap="round" opacity="1.0"/><line x1="128" y1="128" x2="70.8" y2="161.0" stroke="#6F6F7A" stroke-width="11" stroke-linecap="round" opacity="1.0"/></g></g>
+<g clip-path="url(#R)"><g transform="translate(16,0)"><polygon points="128.0,62.0 185.2,95.0 185.2,161.0 128.0,194.0 70.8,161.0 70.8,95.0" fill="none" stroke="#E87D0D" stroke-width="11" stroke-linejoin="round" opacity="1.0"/><line x1="128" y1="128" x2="128.0" y2="62.0" stroke="#E87D0D" stroke-width="11" stroke-linecap="round" opacity="1.0"/><line x1="128" y1="128" x2="185.2" y2="161.0" stroke="#E87D0D" stroke-width="11" stroke-linecap="round" opacity="1.0"/><line x1="128" y1="128" x2="70.8" y2="161.0" stroke="#E87D0D" stroke-width="11" stroke-linecap="round" opacity="1.0"/></g></g>
+<line x1="128" y1="34" x2="128" y2="222" stroke="#3A3A42" stroke-width="6" stroke-linecap="round"/>
+<defs><clipPath id="L"><rect x="0" y="0" width="122" height="256"/></clipPath>
+<clipPath id="R"><rect x="134" y="0" width="122" height="256"/></clipPath></defs>
+</svg>
