@@ -567,3 +567,47 @@ class TestDeduplication:
 		growth = (two - one) / one
 		assert growth < 0.35, f"second snapshot grew the file by {growth:.0%}"
 
+
+
+class TestSidecarsWrittenBeforeGitHashWasRemoved:
+	"""
+	Snapshots stored by earlier versions carry a `git_hash` key.
+
+	BlenDiff used to stamp each snapshot with the short HEAD hash of the
+	repository holding the .blend. That was removed because the Extensions
+	Platform does not host add-ons needing software beyond Blender installed,
+	and reading it meant running git.
+
+	Anyone who used those versions has the key sitting in their .blendiff file
+	already. Loading must ignore it rather than fail, or the removal would
+	destroy the history it was meant to leave untouched.
+	"""
+
+	def test_snapshot_with_a_git_hash_still_loads(self, tmp_path):
+		blend = tmp_path / "scene.blend"
+		blend.write_text("")
+		mgr = SidecarManager(str(blend))
+		mgr.save_snapshot("v1", "Scene", {"objects": {}})
+
+		# Put the field back exactly as an older BlenDiff wrote it.
+		path = mgr.sidecar_path
+		with open(path, encoding="utf-8") as handle:
+			raw = json.load(handle)
+		raw["snapshots"][0]["git_hash"] = "a3f2c1b"
+		with open(path, "w", encoding="utf-8") as handle:
+			json.dump(raw, handle)
+
+		snapshots = SidecarManager(str(blend)).list_snapshots()
+		assert len(snapshots) == 1
+		assert snapshots[0].label == "v1"
+		assert not hasattr(snapshots[0], "git_hash")
+
+	def test_new_snapshots_do_not_write_the_field(self, tmp_path):
+		blend = tmp_path / "scene.blend"
+		blend.write_text("")
+		mgr = SidecarManager(str(blend))
+		mgr.save_snapshot("v1", "Scene", {"objects": {}})
+
+		with open(mgr.sidecar_path, encoding="utf-8") as handle:
+			raw = json.load(handle)
+		assert "git_hash" not in raw["snapshots"][0]

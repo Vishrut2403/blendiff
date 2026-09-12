@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.8.3 (2026-09-12)
+
+### Removed
+- **Snapshots no longer record the Git commit they were taken at.** Saving a
+  snapshot used to run `git rev-parse --short HEAD` in the .blend file's own
+  directory and store the result, so a snapshot could say which commit it
+  belonged to.
+
+  The Extensions Platform declined the submission over it. Terms of service 5.2
+  does not allow an extension to need software beyond Blender installed, and it
+  says so "even if those features are considered optional", which rules out the
+  usual defence that the call was wrapped in try/except and degraded to None
+  when git was absent. Running another program at all is the problem.
+
+  The feature was not reachable from the interface in any case: the hash was
+  only ever appended by `Snapshot.label_display()`, and the snapshot list draws
+  `Snapshot.label` instead. `label_display()` has been removed along with it.
+
+  Sidecar files written by earlier versions still carry a `git_hash` key.
+  Loading ignores it rather than failing, so existing history opens unchanged.
+
+### Added
+- `tests/test_no_external_programs.py` parses every module for anything that
+  starts or locates another program: the `subprocess` module, `os.system`,
+  `os.popen`, the `os.exec*` and `os.spawn*` families, and `shutil.which`.
+  The pre-submission checklist covered network access, `__file__` misuse and
+  `sys.path` manipulation, and never looked for a subprocess, which is how this
+  reached review.
+
 ## 0.8.2 (2026-09-11)
 
 ### Fixed

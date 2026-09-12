@@ -3,7 +3,7 @@ schema_version = "1.0.0"
 id = "blendiff"
 name = "BlenDiff"
 tagline = "See exactly what changed between versions of a .blend"
-version = "0.8.2"
+version = "0.8.3"
 type = "add-on"
 
 maintainer = "Vishrut Sachan <vishrutsachan2004@gmail.com>"

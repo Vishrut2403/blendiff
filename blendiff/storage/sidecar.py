@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import subprocess
 import tempfile
 import uuid
 from dataclasses import dataclass, asdict
@@ -24,36 +23,6 @@ SIDECAR_EXTENSION = ".blendiff"
 SUPPORTED_SIDECAR_VERSIONS = ("0.1", "0.2", "0.3")
 
 
-# Git helper
-
-def _get_git_hash(cwd: Optional[str] = None) -> Optional[str]:
-	"""
-	Return the short HEAD hash of the repository containing ``cwd``.
-
-	``cwd`` must be a real directory. There is deliberately no fallback to the
-	process working directory: Blender's cwd is wherever it happened to be
-	launched from, so falling back would stamp snapshots with the hash of a
-	completely unrelated repository — silently wrong provenance, which is worse
-	than no provenance at all.
-	"""
-	if not cwd or not os.path.isdir(cwd):
-		return None
-
-	try:
-		result = subprocess.run(
-			["git", "rev-parse", "--short", "HEAD"],
-			cwd=cwd,
-			capture_output=True,
-			text=True,
-			timeout=2,
-		)
-		if result.returncode == 0:
-			return result.stdout.strip() or None
-		return None
-	except Exception:
-		return None
-
-
 # Data model
 
 @dataclass
@@ -63,15 +32,12 @@ class Snapshot:
 		timestamp: str
 		scene_name: str
 		data: dict
-		git_hash: Optional[str] = None
 
 		@staticmethod
 		def create(
 				label: str,
 				scene_name: str,
 				data: dict,
-				git_cwd: Optional[str] = None,
-				git_hash_override: Optional[str] = None,
 		) -> "Snapshot":
 				return Snapshot(
 						id=str(uuid.uuid4()),
@@ -79,7 +45,6 @@ class Snapshot:
 						timestamp=datetime.now(timezone.utc).isoformat(),
 						scene_name=scene_name,
 						data=data,
-						git_hash=git_hash_override if git_hash_override is not None else _get_git_hash(cwd=git_cwd),
 				)
 
 		def to_dict(self) -> dict:
@@ -114,7 +79,6 @@ class Snapshot:
 						timestamp=d["timestamp"],
 						scene_name=d["scene_name"],
 						data=data,
-						git_hash=d.get("git_hash"),
 				)
 
 		@property
@@ -131,12 +95,6 @@ class Snapshot:
 						return local_dt.strftime("%Y-%m-%d %H:%M:%S")
 				except Exception:
 						return self.timestamp
-
-		def label_display(self) -> str:
-
-				if self.git_hash:
-						return f"{self.label} [{self.git_hash}]"
-				return self.label
 
 
 # Sidecar file shape
@@ -198,16 +156,10 @@ class SidecarManager:
 
 				self._require_available()
 
-				# Only the .blend file's own directory is consulted — see
-				# _get_git_hash for why there is no process-cwd fallback.
-				blend_dir = os.path.dirname(os.path.abspath(self._blend_filepath))
-				git_hash = _get_git_hash(cwd=blend_dir)
-
 				snap = Snapshot.create(
 						label=label,
 						scene_name=scene_name,
 						data=serialized_scene,
-						git_hash_override=git_hash,
 				)
 
 				data = self._load_raw()

@@ -31,7 +31,7 @@ pure-Python core installed from PyPI, and outside Blender entirely.
 # It was previously stated in three places, here, in bl_info, and in
 # pyproject.toml, which had drifted to 0.3.0 / 0.4.0 / 0.5.0 simultaneously.
 # pyproject reads this string directly, and a test keeps bl_info in step.
-__version__ = "0.8.2"
+__version__ = "0.8.3"
 
 # bl_info's version must be written out as a literal tuple, never computed from
 # __version__.
@@ -50,7 +50,7 @@ __version__ = "0.8.2"
 bl_info = {
 	"name":        "BlenDiff",
 	"author":      "Vishrut Sachan",
-	"version":     (0, 8, 2),
+	"version":     (0, 8, 3),
 	"blender":     (3, 6, 0),
 	"location":    "3D Viewport > Sidebar > BlenDiff",
 	"description": "Semantic scene diff, snapshot history, and assisted merge for .blend files",
