@@ -136,10 +136,17 @@ def diff_modifier_stack(
 				))
 
 		# Params
+		#
+		# Only keys both sides actually recorded. A key present on one side and
+		# absent on the other means one snapshot predates BlenDiff capturing
+		# it, not that the value changed. Geometry Nodes made this visible:
+		# before 0.9.0 a node group's inputs were not captured at all, so
+		# comparing an older snapshot against a newer one reported every input
+		# as newly set. An unset value is recorded as null rather than left
+		# out, so absence is unambiguous.
 		params_a = mod_a.get("params", {})
 		params_b = mod_b.get("params", {})
-		all_param_keys = sorted(set(params_a) | set(params_b))
-		for key in all_param_keys:
+		for key in sorted(set(params_a) & set(params_b)):
 			val_a = params_a.get(key)
 			val_b = params_b.get(key)
 			if not _params_equal(key, val_a, val_b):

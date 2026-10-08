@@ -439,7 +439,9 @@ def _apply_light(obj: Any, path: str, value: Any, context: Any) -> None:
 # `.type` is excluded so it stays unapplicable and reports its reason. Matching
 # it here would make can_apply() claim the merge can retype a modifier, and the
 # write would then fail at apply time instead of being skipped cleanly.
-_MODIFIER_PROP = re.compile(r"^modifiers\[(\d+)\]\.(?!type$)([A-Za-z_]\w*)$")
+_MODIFIER_PROP = re.compile(
+	r"^modifiers\[(\d+)\]\.(?!type$|node_group$)([A-Za-z_][\w.]*)$"
+)
 
 #: Fields every modifier has, named identically in the snapshot and in bpy.
 _MODIFIER_COMMON = ("name", "show_viewport", "show_render")
@@ -491,6 +493,10 @@ def _apply_modifier(obj: Any, path: str, value: Any, context: Any) -> None:
 		setattr(mod, key, value)
 		return
 
+	if key.startswith(_NODE_INPUT_PREFIX):
+		_apply_node_input(mod, key[len(_NODE_INPUT_PREFIX):], value, context)
+		return
+
 	if key == "object_name":
 		# The parameter holds an object reference, stored as a name.
 		if value is None:
@@ -509,6 +515,84 @@ def _apply_modifier(obj: Any, path: str, value: Any, context: Any) -> None:
 			f"slot {index} is {mod.type} in this scene."
 		)
 	setattr(mod, attr, value)
+
+
+#: Geometry Nodes input keys are flattened as "inputs.<visible socket name>".
+_NODE_INPUT_PREFIX = "inputs."
+
+#: Socket types that hold a datablock rather than a plain value.
+_ID_SOCKETS = frozenset((
+	"NodeSocketObject",
+	"NodeSocketMaterial",
+	"NodeSocketCollection",
+	"NodeSocketImage",
+))
+
+
+def _resolve_id_socket(socket_type: str, name: str, context: Any) -> Any:
+	"""
+	Find the datablock an ID-valued input refers to, by name.
+
+	Object sockets resolve within the scene, for the same reason merge targets
+	do: a library object sharing a name would otherwise win. The others are
+	file-wide collections with no scene-level equivalent.
+	"""
+	import bpy
+
+	if socket_type == "NodeSocketObject":
+		return scene_object(context, name)
+	if socket_type == "NodeSocketMaterial":
+		return bpy.data.materials.get(name)
+	if socket_type == "NodeSocketCollection":
+		return bpy.data.collections.get(name)
+	if socket_type == "NodeSocketImage":
+		return bpy.data.images.get(name)
+	return None
+
+
+def _node_input_socket(group: Any, socket_name: str):
+	"""The interface item for one input, by its visible name."""
+	for item in group.interface.items_tree:
+		if getattr(item, "in_out", None) == "INPUT" and item.name == socket_name:
+			return item
+	return None
+
+
+def _apply_node_input(mod: Any, socket_name: str, value: Any, context: Any) -> None:
+	"""
+	Write one Geometry Nodes input.
+
+	Inputs live on the modifier as IDProperties keyed by an opaque identifier
+	("Socket_3"), while the name the snapshot records is the one the artist
+	sees. The node group's interface is the only thing that maps between them,
+	so a write is only possible while the same group is assigned.
+	"""
+	group = getattr(mod, "node_group", None)
+	if group is None:
+		raise ValueError(
+			f"{mod.name!r} has no node group assigned, so {socket_name!r} "
+			f"cannot be set."
+		)
+
+	item = _node_input_socket(group, socket_name)
+	if item is None:
+		raise ValueError(
+			f"Node group {group.name!r} has no input named {socket_name!r}; "
+			f"it differs from the one the snapshot recorded."
+		)
+
+	socket_type = getattr(item, "socket_type", "")
+	if socket_type in _ID_SOCKETS:
+		if value is None:
+			mod[item.identifier] = None
+			return
+		target = _resolve_id_socket(socket_type, value, context)
+		if target is None:
+			raise ValueError(f"{socket_type} input {socket_name!r}: {value!r} not found.")
+		mod[item.identifier] = target
+		return
+
+	mod[item.identifier] = value
 
 
 def _apply_modifier_order(obj: Any, path: str, value: Any, context: Any) -> None:
@@ -600,6 +684,8 @@ UNSUPPORTED_REASONS: tuple[tuple[re.Pattern, str], ...] = (
 	 "Mesh geometry is summarised, not stored — BlenDiff cannot rebuild it."),
 	(re.compile(r"^modifiers\[\d+\]\.type$"),
 	 "Changing a modifier's type replaces it; re-create it manually."),
+	(re.compile(r"^modifiers\[\d+\]\.node_group$"),
+	 "Swapping a node group changes which inputs exist; assign it by hand."),
 	(re.compile(r"^modifiers\[\d+\]$"),
 	 "Adding or removing a modifier is not applicable; the snapshot does not "
 	 "record its settings."),

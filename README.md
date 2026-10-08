@@ -47,6 +47,8 @@ Apply Merge stays disabled until nothing is left undecided.
 - **Armatures**: bone hierarchy, rest pose, roll, bone collections, pose transforms
   and bone constraints, so a reparented finger or a rewired IK chain is visible
 - **Modifiers and constraints**: the whole stack, in order, with per setting detail
+- **Geometry nodes**: the node group on a modifier and every input it exposes,
+  by the name you see in the panel rather than an internal socket number
 - **Animation**: keyframe counts, frame ranges, interpolation, drivers and NLA tracks
 - **Scene settings**: render engine, resolution, sampling, output format, colour
   management, world background, cameras and lights
@@ -113,6 +115,7 @@ would then discard.
 | Camera and light settings | |
 | Material slot assignment | |
 | Modifier settings and stack order | |
+| Geometry nodes inputs | Swapping a node group |
 
 ---
 

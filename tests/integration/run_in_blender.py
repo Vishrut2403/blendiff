@@ -1395,6 +1395,121 @@ def test_no_domains_skipped_between_two_current_snapshots():
 
 # Runner
 
+# Geometry Nodes
+#
+# A Geometry Nodes modifier has no fixed property table: its inputs are
+# whatever the node group exposes, stored as IDProperties under opaque
+# identifiers. These need real bpy, because the identifier-to-name mapping
+# lives on the node group interface and nothing else can stand in for it.
+
+def _scatter_cube():
+	"""A cube with a Geometry Nodes modifier exposing one input of each shape."""
+	reset_scene()
+	bpy.ops.mesh.primitive_cube_add()
+	cube = bpy.context.active_object
+
+	target = bpy.data.objects.new("Scatter_Target", None)
+	bpy.context.scene.collection.objects.link(target)
+
+	mod = cube.modifiers.new("GeometryNodes", "NODES")
+	group = bpy.data.node_groups.new("Scatter", "GeometryNodeTree")
+	mod.node_group = group
+	for name, kind in (
+		("Density", "NodeSocketFloat"),
+		("Count", "NodeSocketInt"),
+		("Offset", "NodeSocketVector"),
+		("Target", "NodeSocketObject"),
+	):
+		group.interface.new_socket(name=name, in_out="INPUT", socket_type=kind)
+
+	ids = {
+		item.name: item.identifier
+		for item in group.interface.items_tree
+		if getattr(item, "in_out", None) == "INPUT"
+	}
+	return cube, mod, ids, target
+
+
+@test
+def test_geometry_nodes_inputs_extracted_by_visible_name():
+	cube, mod, ids, _target = _scatter_cube()
+	mod[ids["Density"]] = 200.0
+	mod[ids["Count"]] = 10
+
+	params = extract()["objects"]["Cube"]["modifier_stack"][0]["params"]
+
+	check_eq(params["node_group"], "Scatter", "node group name")
+	check_eq(params["inputs.Density"], 200.0, "float input")
+	check_eq(params["inputs.Count"], 10, "int input")
+	check_eq(params["inputs.Offset"], [0.0, 0.0, 0.0], "vector input")
+
+
+@test
+def test_geometry_nodes_object_input_recorded_as_a_name():
+	cube, mod, ids, target = _scatter_cube()
+	mod[ids["Target"]] = target
+
+	params = extract()["objects"]["Cube"]["modifier_stack"][0]["params"]
+	check_eq(params["inputs.Target"], "Scatter_Target", "object input as a name")
+
+
+@test
+def test_geometry_nodes_input_change_is_diffed_per_input():
+	cube, mod, ids, _target = _scatter_cube()
+	mod[ids["Density"]] = 200.0
+	before = extract()
+
+	mod[ids["Density"]] = 50.0
+	after = extract()
+
+	diff = DiffEngine().compare(before, after)
+	paths = [c.property_path for o in diff.modified_objects for c in o.changes]
+	check_eq(paths, ["modifiers[0].inputs.Density"], "one input reported, by name")
+
+
+@test
+def test_geometry_nodes_modifier_without_a_group_still_extracts():
+	reset_scene()
+	bpy.ops.mesh.primitive_cube_add()
+	cube = bpy.context.active_object
+	cube.modifiers.new("GeometryNodes", "NODES")
+
+	params = extract()["objects"]["Cube"]["modifier_stack"][0]["params"]
+	check_eq(params["node_group"], None, "no node group assigned")
+
+
+@test
+def test_geometry_nodes_input_merges_back():
+	from blendiff.data_model.conflict import Resolution
+	from blendiff.merge_engine.applier import Applier
+	from blendiff.merge_engine.merge_engine import MergeEngine
+
+	cube, mod, ids, target = _scatter_cube()
+	mod[ids["Density"]] = 200.0
+	base = extract()
+
+	mod[ids["Density"]] = 50.0
+	mod[ids["Target"]] = target
+	version_a = extract()
+
+	mod[ids["Density"]] = 200.0
+	mod[ids["Target"]] = None
+	version_b = extract()
+
+	three_way = MergeEngine().three_way_diff(
+		base=base, version_a=version_a, version_b=version_b,
+		base_label="base", label_a="A", label_b="B",
+	)
+	for proposal in three_way.proposals:
+		for conflict in proposal.conflicts:
+			conflict.resolution = Resolution.USE_A
+
+	result = Applier().apply_all(three_way, bpy.context)
+	check_eq(result.failed, [], "nothing failed to apply")
+	check_eq(mod[ids["Density"]], 50.0, "density taken from A")
+	check_eq(mod.get(ids["Target"]), target, "object input taken from A")
+
+
 def main() -> int:
 	passed, failed = 0, []
 

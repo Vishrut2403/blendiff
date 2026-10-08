@@ -23,6 +23,8 @@ from fake_bpy import (
 	FakeData,
 	FakeMaterial,
 	FakeModifier,
+	FakeNodeGroup,
+	FakeSocket,
 	FakeObject,
 	FakeSlot,
 	FakeStruct,
@@ -932,3 +934,77 @@ class TestConstraintsExplainThemselves:
 		assert len(result.skipped) == 3
 		for outcome in result.skipped:
 			assert "Constraint stacks are not yet applicable" in outcome.detail
+
+
+class TestGeometryNodesInputs:
+	"""
+	Geometry Nodes inputs are written back by their visible name.
+
+	Inputs are stored on the modifier as IDProperties keyed by an opaque
+	identifier such as "Socket_3", while the name the artist sees lives on the
+	node group's interface. A snapshot records the visible name, so applying
+	one means mapping back through the interface. Nothing else can do it,
+	which is why the write is refused when the group is missing or has
+	changed shape.
+	"""
+
+	@pytest.fixture
+	def scattered(self, cube):
+		group = FakeNodeGroup("Scatter", [
+			FakeSocket("Density", "Socket_0", "NodeSocketFloat"),
+			FakeSocket("Count", "Socket_1", "NodeSocketInt"),
+			FakeSocket("Target", "Socket_2", "NodeSocketObject"),
+			FakeSocket("Geometry", "Socket_9", "NodeSocketGeometry", in_out="OUTPUT"),
+		])
+		mod = FakeModifier("GeometryNodes", "NODES")
+		mod.node_group = group
+		mod["Socket_0"] = 200.0
+		cube.modifiers.append(mod)
+		return mod
+
+	def test_input_is_written_by_visible_name(self, cube, scattered):
+		result = _apply(_proposal("Cube", [("modifiers[0].inputs.Density", 50.0)]))
+		assert result.applied, result.failed
+		assert scattered["Socket_0"] == 50.0
+
+	def test_object_input_resolves_within_the_scene(self, cube, scattered, bpy):
+		target = FakeObject("Scatter_Target")
+		bpy.data.objects.add(target)
+
+		result = _apply(_proposal("Cube", [("modifiers[0].inputs.Target", "Scatter_Target")]))
+
+		assert result.applied, result.failed
+		assert scattered["Socket_2"] is target
+
+	def test_object_input_outside_the_scene_fails(self, cube, scattered, bpy):
+		bpy.data.objects.add(FakeObject("Elsewhere"), in_scene=False)
+		result = _apply(_proposal("Cube", [("modifiers[0].inputs.Target", "Elsewhere")]))
+		assert not result.applied
+		assert "not found" in result.failed[0].detail
+
+	def test_clearing_an_object_input_is_allowed(self, cube, scattered):
+		scattered["Socket_2"] = FakeObject("Old")
+		_apply(_proposal("Cube", [("modifiers[0].inputs.Target", None)]))
+		assert scattered["Socket_2"] is None
+
+	def test_unknown_input_name_fails_with_the_group_named(self, cube, scattered):
+		result = _apply(_proposal("Cube", [("modifiers[0].inputs.Scale", 2.0)]))
+		assert not result.applied
+		assert "no input named 'Scale'" in result.failed[0].detail
+		assert "Scatter" in result.failed[0].detail
+
+	def test_output_sockets_are_not_writable_inputs(self, cube, scattered):
+		result = _apply(_proposal("Cube", [("modifiers[0].inputs.Geometry", 1)]))
+		assert not result.applied
+		assert "no input named 'Geometry'" in result.failed[0].detail
+
+	def test_modifier_without_a_node_group_fails_clearly(self, cube):
+		cube.modifiers.append(FakeModifier("GeometryNodes", "NODES"))
+		result = _apply(_proposal("Cube", [("modifiers[0].inputs.Density", 1.0)]))
+		assert not result.applied
+		assert "no node group assigned" in result.failed[0].detail
+
+	def test_swapping_the_node_group_is_reported_not_applied(self, cube, scattered):
+		result = _apply(_proposal("Cube", [("modifiers[0].node_group", "Other")]))
+		assert not result.applied
+		assert "assign it by hand" in result.skipped[0].detail

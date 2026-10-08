@@ -357,3 +357,49 @@ class TestReorderIsPairedByName:
 		paths = [c.property_path for c in diff_modifier_stack(a, b)]
 
 		assert paths == ["modifiers[0].type"]
+
+
+class TestParamsOnlyOneSideRecorded:
+	"""
+	A parameter one snapshot never captured is not a change.
+
+	Geometry Nodes made this visible. Before 0.9.0 a node group's inputs were
+	not captured at all, so comparing a snapshot from before against one from
+	after reported every input as newly set: a diff full of edits nobody made,
+	which is the exact failure schema versioning exists to prevent.
+
+	An unset value is recorded as null rather than left out, so a key being
+	absent means "not captured" and nothing else.
+	"""
+
+	@staticmethod
+	def _nodes(params):
+		return [{"index": 0, "name": "GeometryNodes", "type": "NODES",
+		         "show_viewport": True, "show_render": True,
+		         "is_active": True, "params": params}]
+
+	def test_upgrading_does_not_invent_changes(self):
+		before = self._nodes({})
+		after = self._nodes({"node_group": "Scatter", "inputs.Density": 200.0})
+
+		assert diff_modifier_stack(before, after) == []
+
+	def test_downgrading_does_not_invent_changes_either(self):
+		after = self._nodes({})
+		before = self._nodes({"node_group": "Scatter", "inputs.Density": 200.0})
+
+		assert diff_modifier_stack(before, after) == []
+
+	def test_a_real_change_is_still_reported(self):
+		before = self._nodes({"node_group": "Scatter", "inputs.Density": 200.0})
+		after = self._nodes({"node_group": "Scatter", "inputs.Density": 50.0})
+
+		changes = diff_modifier_stack(before, after)
+		assert [c.property_path for c in changes] == ["modifiers[0].inputs.Density"]
+
+	def test_a_null_value_on_both_sides_is_compared_normally(self):
+		before = self._nodes({"inputs.Target": None})
+		after = self._nodes({"inputs.Target": "Scatter_Target"})
+
+		changes = diff_modifier_stack(before, after)
+		assert [c.property_path for c in changes] == ["modifiers[0].inputs.Target"]

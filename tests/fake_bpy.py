@@ -48,6 +48,30 @@ class FakeData:
 		self.__dict__.update(kwargs)
 
 
+class FakeSocket:
+	"""One entry on a node group's interface."""
+
+	def __init__(self, name: str, identifier: str, socket_type: str = "NodeSocketFloat",
+	             in_out: str = "INPUT"):
+		self.name = name
+		self.identifier = identifier
+		self.socket_type = socket_type
+		self.in_out = in_out
+
+
+class FakeNodeGroup:
+	"""
+	A node group, as far as a Geometry Nodes modifier is concerned.
+
+	Only the interface matters here: it is what maps the visible socket name a
+	snapshot records back to the opaque identifier the value is stored under.
+	"""
+
+	def __init__(self, name: str, sockets=()):
+		self.name = name
+		self.interface = FakeStruct(items_tree=list(sockets))
+
+
 class FakeModifierStack(list):
 	"""
 	obj.modifiers, which is a bpy_prop_collection and not a list.
@@ -79,8 +103,24 @@ class FakeModifier:
 		self.show_render = True
 		self.is_active = True
 		self.object = None
+		self.node_group = None
+		#: IDProperty storage, which is how a Geometry Nodes modifier holds
+		#: its input values. Keyed by socket identifier, not by name.
+		self._id_props: dict = {}
 		for key, value in params.items():
 			setattr(self, key, value)
+
+	def __setitem__(self, key, value):
+		self._id_props[key] = value
+
+	def __getitem__(self, key):
+		return self._id_props[key]
+
+	def get(self, key, default=None):
+		return self._id_props.get(key, default)
+
+	def keys(self):
+		return self._id_props.keys()
 
 
 class FakeObject:

@@ -115,6 +115,58 @@ def _resolve(mod, bpy_attr: str, output_key: str):
 	return to_jsonable(val)
 
 
+# Geometry Nodes
+#
+# A Geometry Nodes modifier has no fixed set of properties: its inputs are
+# whatever the node group exposes. They are stored on the modifier as
+# IDProperties keyed by an opaque identifier ("Socket_3"), while the name the
+# artist sees ("Density") lives on the node group's interface. Reporting the
+# identifier would be useless, so the interface is walked to recover names.
+#
+# Without this a Geometry Nodes modifier was captured as name, type and
+# visibility only, so changing any input, which is the entire point of a node
+# group, produced no diff at all.
+
+def _socket_value(value):
+	"""One input value, as something JSON can hold."""
+	# Object, Collection, Material and Image sockets hold a datablock. Every
+	# one of those is recorded by name, as object references are elsewhere.
+	if value is not None and not isinstance(value, str) and hasattr(value, "name"):
+		return value.name
+	return to_jsonable(value)
+
+
+def extract_node_group_inputs(mod) -> dict:
+	"""
+	Input values of a Geometry Nodes modifier, keyed by their visible name.
+
+	Returns an empty dict when the modifier has no node group assigned, which
+	is the state a freshly added Geometry Nodes modifier is in.
+	"""
+	group = getattr(mod, "node_group", None)
+	if group is None:
+		return {}
+
+	inputs: dict = {}
+	try:
+		items = list(group.interface.items_tree)
+	except AttributeError:
+		# Blender 4.0 and earlier exposed the interface differently. Rather
+		# than guess at the old shape, record nothing and let the node group
+		# name alone carry the change.
+		return {}
+
+	for item in items:
+		# items_tree also holds output sockets and panels.
+		if getattr(item, "in_out", None) != "INPUT":
+			continue
+		identifier = getattr(item, "identifier", "")
+		if not identifier:
+			continue
+		inputs[item.name] = _socket_value(mod.get(identifier))
+	return inputs
+
+
 def extract_modifier_stack(obj) -> list[dict]:
 	"""
 	Parameters
@@ -145,6 +197,15 @@ def extract_modifier_stack(obj) -> list[dict]:
 		params: dict = {}
 		for bpy_attr, output_key in props:
 			params[output_key] = _resolve(mod, bpy_attr, output_key)
+
+		# Geometry Nodes inputs are per node group, so there is no fixed table
+		# for them. They are flattened under an "inputs." prefix so each one
+		# diffs on its own rather than the whole set changing together.
+		if mod.type == "NODES":
+			group = getattr(mod, "node_group", None)
+			params["node_group"] = group.name if group is not None else None
+			for socket_name, value in extract_node_group_inputs(mod).items():
+				params[f"inputs.{socket_name}"] = value
 
 		if params:
 			entry["params"] = params

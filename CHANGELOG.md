@@ -3,6 +3,15 @@
 ## Unreleased
 
 ### Fixed
+- **A modifier parameter only one snapshot recorded is no longer a change.**
+  Parameters were compared across the union of both sides, so a key present in
+  one and absent in the other came out as null changing to a value. Adding
+  Geometry Nodes inputs made that visible: comparing a snapshot taken before
+  0.9.0 against one taken after reported every input as newly set, a first
+  diff full of edits nobody made. Only keys both sides recorded are compared
+  now. An unset value is stored as null rather than left out, so absence
+  unambiguously means "not captured".
+
 - **Constraint changes gave no reason for not being applied.** The explanation
   was matched against `constraints.`, but the diff emits paths like
   `constraints[0].influence`, so it never matched and the user was told only
@@ -27,6 +36,27 @@
   object in another scene would still silently produce "Name.001".
 
 ### Added
+- **Geometry Nodes inputs are captured, compared and merged.** A Geometry
+  Nodes modifier was recorded as a name, a type and two visibility flags, and
+  nothing else. Its inputs are the entire point of a node group, so changing
+  the scatter density from 200 to 50 produced no diff at all and BlenDiff
+  called the scene unchanged.
+
+  Inputs are stored on the modifier as IDProperties under opaque identifiers
+  such as `Socket_3`, while the name an artist sees lives on the node group's
+  interface. BlenDiff walks the interface to recover the names, so a diff
+  reads `modifiers[0].inputs.Density` rather than a socket number. Each input
+  is compared on its own, so one changed value does not report the whole group
+  as different.
+
+  Values holding a datablock, such as an Object or Material input, are
+  recorded by name. Merging resolves an Object input within the scene, the
+  same way merge targets and parents are resolved.
+
+  Swapping the node group itself is reported rather than applied, because a
+  different group has different inputs, and the values recorded against the
+  old one would not survive the change.
+
 - **Merge applies settings on an existing modifier.** Changing a Subsurf
   level, a Bevel width or switching a modifier off in the viewport is now
   written back, including parameters that hold an object reference such as a
