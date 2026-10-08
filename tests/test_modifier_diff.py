@@ -296,3 +296,64 @@ class TestPropertyChangeInstances:
 		b = [_subsurf(levels=3)]
 		for c in diff_modifier_stack(a, b):
 			assert isinstance(c, PropertyChange)
+
+
+class TestReorderIsPairedByName:
+	"""
+	A reorder is one order change, not a pile of type changes.
+
+	Modifiers were paired by slot, so swapping a Bevel and a Subsurf came out
+	as "slot 0 changed type" and "slot 1 changed type". That is wrong on its
+	face, and it was also unapplicable, so a merge could not reorder a stack at
+	all. The `modifiers.order` branch existed but only fired when nothing else
+	differed, which a real reorder never satisfies.
+
+	Blender keeps modifier names unique per object, so when both sides hold the
+	same names in a different order, pairing by name is the honest reading.
+	"""
+
+	@staticmethod
+	def _stack(*entries):
+		return [
+			{"index": i, "name": name, "type": kind, "show_viewport": True,
+			 "show_render": True, "is_active": True, "params": dict(params)}
+			for i, (name, kind, params) in enumerate(entries)
+		]
+
+	def test_swap_reports_order_and_nothing_else(self):
+		a = self._stack(("Subdivision", "SUBSURF", {}), ("Bevel", "BEVEL", {}))
+		b = self._stack(("Bevel", "BEVEL", {}), ("Subdivision", "SUBSURF", {}))
+
+		changes = diff_modifier_stack(a, b)
+
+		assert [c.property_path for c in changes] == ["modifiers.order"]
+		assert changes[0].old_value == ["Subdivision", "Bevel"]
+		assert changes[0].new_value == ["Bevel", "Subdivision"]
+
+	def test_no_type_changes_are_invented(self):
+		a = self._stack(("Subdivision", "SUBSURF", {}), ("Bevel", "BEVEL", {}))
+		b = self._stack(("Bevel", "BEVEL", {}), ("Subdivision", "SUBSURF", {}))
+
+		paths = [c.property_path for c in diff_modifier_stack(a, b)]
+
+		assert not [p for p in paths if p.endswith(".type")]
+
+	def test_a_setting_change_during_a_reorder_uses_the_new_slot(self):
+		a = self._stack(("Subdivision", "SUBSURF", {"levels": 1}), ("Bevel", "BEVEL", {}))
+		b = self._stack(("Bevel", "BEVEL", {}), ("Subdivision", "SUBSURF", {"levels": 4}))
+
+		changes = {c.property_path: c for c in diff_modifier_stack(a, b)}
+
+		assert "modifiers.order" in changes
+		# Subdivision sits at slot 1 after the reorder, and that is the slot the
+		# applier will write to, because order is applied first.
+		assert "modifiers[1].levels" in changes
+		assert changes["modifiers[1].levels"].new_value == 4
+
+	def test_different_names_still_pair_by_slot(self):
+		a = self._stack(("Subdivision", "SUBSURF", {}))
+		b = self._stack(("Bevel", "BEVEL", {}))
+
+		paths = [c.property_path for c in diff_modifier_stack(a, b)]
+
+		assert paths == ["modifiers[0].type"]

@@ -76,6 +76,10 @@ def _priority(property_path: str) -> int:
 	"""
 	if property_path.endswith("rotation_mode"):
 		return 0
+	# Reordering must precede every modifiers[i] write, because those paths
+	# index into the order the snapshot recorded, not the order on screen.
+	if property_path == "modifiers.order":
+		return 1
 	if property_path == "name":
 		return 99
 	return _DEFAULT_PRIORITY

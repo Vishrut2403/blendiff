@@ -54,13 +54,41 @@ def diff_modifier_stack(
 	"""
 	changes: list[PropertyChange] = []
 
-	map_a = {m["index"]: m for m in stack_a or []}
-	map_b = {m["index"]: m for m in stack_b or []}
-	all_indices = sorted(set(map_a) | set(map_b))
+	names_a = [m["name"] for m in stack_a or []]
+	names_b = [m["name"] for m in stack_b or []]
 
-	for idx in all_indices:
-		mod_a = map_a.get(idx)
-		mod_b = map_b.get(idx)
+	# A reorder has to be recognised before anything else, because pairing by
+	# slot turns it into nonsense: swapping a Bevel and a Subsurf reads as
+	# "slot 0 changed type, slot 1 changed type", which is both wrong and
+	# unapplicable. Blender keeps modifier names unique per object, so when
+	# both sides hold the same names in a different order, pairing by name is
+	# the honest reading.
+	reordered = (
+		len(set(names_a)) == len(names_a)
+		and set(names_a) == set(names_b)
+		and names_a != names_b
+	)
+
+	if reordered:
+		changes.append(PropertyChange(
+			property_path=f"{prefix}.order",
+			old_value=names_a,
+			new_value=names_b,
+		))
+		by_name = {m["name"]: m for m in stack_a}
+		pairs = [
+			(index, by_name[mod["name"]], mod)
+			for index, mod in enumerate(stack_b)
+		]
+	else:
+		map_a = {m["index"]: m for m in stack_a or []}
+		map_b = {m["index"]: m for m in stack_b or []}
+		pairs = [
+			(idx, map_a.get(idx), map_b.get(idx))
+			for idx in sorted(set(map_a) | set(map_b))
+		]
+
+	for idx, mod_a, mod_b in pairs:
 		path_base = f"{prefix}[{idx}]"
 
 		# Added
@@ -120,15 +148,5 @@ def diff_modifier_stack(
 					old_value=val_a,
 					new_value=val_b,
 				))
-
-	# Detect full stack reorder — same modifiers, different order
-	names_a = [m["name"] for m in stack_a]
-	names_b = [m["name"] for m in stack_b]
-	if set(names_a) == set(names_b) and names_a != names_b and not changes:
-		changes.append(PropertyChange(
-			property_path=f"{prefix}.order",
-			old_value=names_a,
-			new_value=names_b,
-		))
 
 	return changes

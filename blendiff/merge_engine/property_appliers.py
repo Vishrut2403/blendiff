@@ -511,6 +511,36 @@ def _apply_modifier(obj: Any, path: str, value: Any, context: Any) -> None:
 	setattr(mod, attr, value)
 
 
+def _apply_modifier_order(obj: Any, path: str, value: Any, context: Any) -> None:
+	"""
+	Reorder the modifier stack to the recorded order of names.
+
+	Order is the whole point of a modifier stack: a Bevel before a Subsurf and
+	a Bevel after it give different meshes, so a merge that applied every
+	setting but left the order alone would be quietly wrong.
+
+	The names must be exactly the ones present. The diff only reports an order
+	change when both sides hold the same set of modifiers, so a mismatch here
+	means the live stack has moved on from both snapshots, and reordering what
+	is there now would be guesswork.
+	"""
+	target = [str(name) for name in value or []]
+	current = [mod.name for mod in obj.modifiers]
+
+	if sorted(target) != sorted(current):
+		raise ValueError(
+			f"{obj.name!r} has modifiers {current}, but the snapshot recorded "
+			f"{target}; reorder it by hand."
+		)
+
+	# Walk each name to its slot. Stacks are a handful of entries, so the
+	# repeated scan costs nothing worth avoiding.
+	for index, name in enumerate(target):
+		position = [mod.name for mod in obj.modifiers].index(name)
+		if position != index:
+			obj.modifiers.move(position, index)
+
+
 # Registry
 #
 # Order matters only in that the first match wins; patterns are disjoint.
@@ -544,6 +574,7 @@ REGISTRY: tuple[ApplierEntry, ...] = (
 	ApplierEntry(re.compile(r"^camera\.[^.]+$"), _apply_camera, "Camera data"),
 	ApplierEntry(re.compile(r"^light\.[^.]+$"), _apply_light, "Light data"),
 	ApplierEntry(_MODIFIER_PROP, _apply_modifier, "Modifier setting"),
+	ApplierEntry(re.compile(r"^modifiers\.order$"), _apply_modifier_order, "Modifier order"),
 )
 
 
@@ -567,14 +598,15 @@ UNSUPPORTED_REASONS: tuple[tuple[re.Pattern, str], ...] = (
 	 "Custom shapes reference another object; assign it by hand."),
 	(re.compile(r"^mesh\."),
 	 "Mesh geometry is summarised, not stored — BlenDiff cannot rebuild it."),
-	(re.compile(r"^modifiers\.order$"),
-	 "Reordering a modifier stack must be done by hand."),
 	(re.compile(r"^modifiers\[\d+\]\.type$"),
 	 "Changing a modifier's type replaces it; re-create it manually."),
 	(re.compile(r"^modifiers\[\d+\]$"),
 	 "Adding or removing a modifier is not applicable; the snapshot does not "
 	 "record its settings."),
-	(re.compile(r"^constraints?\."),
+	# The diff emits constraints[0].influence and the like, so a pattern
+	# anchored on a dot never matched and these fell through to the generic
+	# reason, which told the user nothing about why.
+	(re.compile(r"^constraints?[\[.]"),
 	 "Constraint stacks are not yet applicable; re-create the constraint manually."),
 	(re.compile(r"^fcurves?\."),
 	 "Animation curves are summarised, not stored — keyframes cannot be rebuilt."),

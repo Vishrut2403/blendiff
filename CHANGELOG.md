@@ -3,6 +3,12 @@
 ## Unreleased
 
 ### Fixed
+- **Constraint changes gave no reason for not being applied.** The explanation
+  was matched against `constraints.`, but the diff emits paths like
+  `constraints[0].influence`, so it never matched and the user was told only
+  that BlenDiff "cannot apply this property automatically". Constraint stacks
+  are still not applicable; now they say so.
+
 - **A merge could write to an object outside the scene.** The applier resolved
   targets through `bpy.data.objects`, which holds every object in the file,
   including objects from other scenes and those linked from a library. Two
@@ -27,11 +33,25 @@
   Mirror target. Previously the whole modifier stack was reported and never
   applied, so resolving a modifier conflict left the scene untouched.
 
-  Adding, removing, retyping and reordering remain unapplicable, and now say
-  why rather than giving the generic reason. A snapshot records an added
-  modifier as the single string `SUBSURF(Subdivision)` with no parameters, so
-  creating one from that would quietly give it defaults and report success.
-  Writing the wrong thing is worse than reporting it.
+  Adding, removing and retyping remain unapplicable, and now say why rather
+  than giving the generic reason. A snapshot records an added modifier as the
+  single string `SUBSURF(Subdivision)` with no parameters, so creating one from
+  that would quietly give it defaults and report success. Writing the wrong
+  thing is worse than reporting it.
+
+- **Merge reorders a modifier stack.** Order is the point of a stack: a Bevel
+  before a Subsurf and a Bevel after it give different meshes, so a merge that
+  wrote every setting and left the order alone was quietly wrong.
+
+  This needed a fix in the diff first. Modifiers were paired by slot, so
+  swapping a Bevel and a Subsurf was reported as "slot 0 changed type" and
+  "slot 1 changed type", which is both wrong and unapplicable. The existing
+  `modifiers.order` branch only fired when nothing else differed, a condition a
+  real reorder never meets, so it never ran. Stacks holding the same names in a
+  different order are now paired by name, which Blender's per-object name
+  uniqueness makes safe, and the reorder is reported as one `modifiers.order`
+  change. Order is applied before any per-modifier write, since those paths
+  index into the reordered stack.
 
 ### Changed
 - **The three snapshot fields in the merge panel are dropdowns.** They were

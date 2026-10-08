@@ -48,6 +48,19 @@ class FakeData:
 		self.__dict__.update(kwargs)
 
 
+class FakeModifierStack(list):
+	"""
+	obj.modifiers, which is a bpy_prop_collection and not a list.
+
+	Indexing and iteration work the same, and it also offers move(from, to),
+	which is how Blender reorders a stack and therefore what the merge applier
+	calls.
+	"""
+
+	def move(self, from_index: int, to_index: int) -> None:
+		self.insert(to_index, self.pop(from_index))
+
+
 class FakeModifier:
 	"""
 	One entry in obj.modifiers.
@@ -94,7 +107,7 @@ class FakeObject:
 		self.parent_bone = ""
 		self.matrix_world = FakeMatrix(name)
 		self.material_slots: list[FakeSlot] = []
-		self.modifiers: list["FakeModifier"] = []
+		self.modifiers: "FakeModifierStack" = FakeModifierStack()
 		self.library = None
 		self.override_library = None
 		self._props: dict[str, Any] = {}

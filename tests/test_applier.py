@@ -860,11 +860,75 @@ class TestModifierSettings:
 		result = _apply(_proposal("Cube", [
 			("modifiers[1]", "BEVEL(Bevel)"),
 			("modifiers[0].type", "BEVEL"),
-			("modifiers.order", ["Bevel", "Subdivision"]),
 		]))
 		assert not result.applied
-		assert len(result.skipped) == 3
+		assert len(result.skipped) == 2
 		reasons = " ".join(outcome.detail for outcome in result.skipped)
 		assert "does not record its settings" in reasons
 		assert "re-create it manually" in reasons
-		assert "by hand" in reasons
+
+
+class TestModifierOrder:
+	"""
+	Stack order is applied, because order changes the result.
+
+	A Bevel before a Subsurf and a Bevel after it produce different meshes, so
+	a merge that wrote every setting and left the order alone would be quietly
+	wrong in a way nothing on screen would explain.
+	"""
+
+	@pytest.fixture
+	def stacked(self, cube):
+		for name, kind in (("Subdivision", "SUBSURF"), ("Bevel", "BEVEL"), ("Array", "ARRAY")):
+			cube.modifiers.append(FakeModifier(name, kind))
+		return cube
+
+	def _order(self, obj):
+		return [mod.name for mod in obj.modifiers]
+
+	def test_stack_is_reordered(self, stacked):
+		result = _apply(_proposal("Cube", [
+			("modifiers.order", ["Bevel", "Array", "Subdivision"]),
+		]))
+		assert result.applied, result.failed
+		assert self._order(stacked) == ["Bevel", "Array", "Subdivision"]
+
+	def test_reversing_the_stack_works(self, stacked):
+		_apply(_proposal("Cube", [("modifiers.order", ["Array", "Bevel", "Subdivision"])]))
+		assert self._order(stacked) == ["Array", "Bevel", "Subdivision"]
+
+	def test_order_already_correct_is_a_no_op(self, stacked):
+		before = self._order(stacked)
+		result = _apply(_proposal("Cube", [("modifiers.order", before)]))
+		assert result.applied
+		assert self._order(stacked) == before
+
+	def test_mismatched_stack_refuses_rather_than_guessing(self, stacked):
+		# The live stack has moved on from what either snapshot recorded.
+		result = _apply(_proposal("Cube", [
+			("modifiers.order", ["Bevel", "Subdivision", "Weld"]),
+		]))
+		assert not result.applied
+		assert "reorder it by hand" in result.failed[0].detail
+		assert self._order(stacked) == ["Subdivision", "Bevel", "Array"]
+
+
+class TestConstraintsExplainThemselves:
+	"""
+	Constraint paths get the constraint reason, not the generic fallback.
+
+	The reason was matched with a pattern anchored on a dot, but the diff emits
+	`constraints[0].influence`, so it never matched and the user was told only
+	that BlenDiff "cannot apply this property automatically".
+	"""
+
+	def test_constraint_paths_name_constraints_in_the_reason(self, cube):
+		result = _apply(_proposal("Cube", [
+			("constraints[0].influence", 0.5),
+			("constraints[1]", None),
+			("constraints[0].type", "COPY_LOCATION"),
+		]))
+		assert not result.applied
+		assert len(result.skipped) == 3
+		for outcome in result.skipped:
+			assert "Constraint stacks are not yet applicable" in outcome.detail

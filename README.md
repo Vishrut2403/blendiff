@@ -109,10 +109,10 @@ would then discard.
 | Parenting, keeping world position | Bone constraints |
 | Pose bone transforms | Adding or removing bones |
 | Rest bones: parenting, rest pose, roll | Object creation, which needs the source file |
-| Custom properties | Adding, removing or reordering a modifier |
+| Custom properties | Adding, removing or retyping a modifier |
 | Camera and light settings | |
 | Material slot assignment | |
-| Settings on an existing modifier | |
+| Modifier settings and stack order | |
 
 ---
 
