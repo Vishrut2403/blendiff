@@ -103,15 +103,16 @@ would then discard.
 | Applied for you | Reported, but reconcile by hand |
 |---|---|
 | Position, rotation, scale | Mesh geometry |
-| Viewport and render visibility | Modifier and constraint stacks |
+| Viewport and render visibility | Constraint stacks |
 | Object names | Keyframes, drivers, NLA strips |
 | Collection membership | Material node graphs |
 | Parenting, keeping world position | Bone constraints |
 | Pose bone transforms | Adding or removing bones |
 | Rest bones: parenting, rest pose, roll | Object creation, which needs the source file |
-| Custom properties | |
+| Custom properties | Adding, removing or reordering a modifier |
 | Camera and light settings | |
 | Material slot assignment | |
+| Settings on an existing modifier | |
 
 ---
 

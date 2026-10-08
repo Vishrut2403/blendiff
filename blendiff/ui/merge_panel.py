@@ -240,21 +240,63 @@ def _fmt(value) -> str:
 
 # WindowManager properties for snapshot label pickers
 
+def _snapshot_items(self, context):
+	"""
+	Snapshot labels for the three pickers, newest first.
+
+	These were plain text fields, so a typo or a half-remembered label gave
+	"Snapshots not found" and the user had to go and read the history panel to
+	find the exact spelling. The labels are already on disk; offering them is
+	what the field should always have done.
+
+	Blender keeps no reference to the strings an EnumProperty callback
+	returns, so building them fresh each redraw is how a dynamic enum leaks or
+	crashes. They are held in a module-level list for as long as the enum
+	is in use.
+	"""
+	global _ENUM_ITEMS
+
+	if not bpy.data.filepath:
+		_ENUM_ITEMS = [("", "Save your .blend first", "")]
+		return _ENUM_ITEMS
+
+	try:
+		snapshots = _get_sidecar(context).list_snapshots()
+	except Exception:
+		snapshots = []
+
+	if not snapshots:
+		_ENUM_ITEMS = [("", "No snapshots saved yet", "")]
+		return _ENUM_ITEMS
+
+	# list_snapshots is already newest first, matching the order the
+	# Snapshot History panel draws them in.
+	_ENUM_ITEMS = [
+		(snap.label, snap.label, snap.timestamp_display())
+		for snap in snapshots
+	]
+	return _ENUM_ITEMS
+
+
+#: Keeps the strings handed to Blender alive. See _snapshot_items.
+_ENUM_ITEMS: list = []
+
+
 def register_wm_props():
-	bpy.types.WindowManager.blendiff_base_label = bpy.props.StringProperty(
-		name="Base Snapshot Label",
-		description="Label of the common ancestor snapshot",
-		default="",
+	bpy.types.WindowManager.blendiff_base_label = bpy.props.EnumProperty(
+		name="Base Snapshot",
+		description="The snapshot both versions grew from",
+		items=_snapshot_items,
 	)
-	bpy.types.WindowManager.blendiff_a_label = bpy.props.StringProperty(
-		name="Version A Label",
-		description="Label of version A snapshot",
-		default="",
+	bpy.types.WindowManager.blendiff_a_label = bpy.props.EnumProperty(
+		name="Version A",
+		description="One of the two versions to merge",
+		items=_snapshot_items,
 	)
-	bpy.types.WindowManager.blendiff_b_label = bpy.props.StringProperty(
-		name="Version B Label",
-		description="Label of version B snapshot",
-		default="",
+	bpy.types.WindowManager.blendiff_b_label = bpy.props.EnumProperty(
+		name="Version B",
+		description="The other version to merge",
+		items=_snapshot_items,
 	)
 
 

@@ -1,5 +1,45 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **A merge could write to an object outside the scene.** The applier resolved
+  targets through `bpy.data.objects`, which holds every object in the file,
+  including objects from other scenes and those linked from a library. Two
+  datablocks can share a name when one is linked, and the lookup returns
+  whichever it holds, so a merge could change an object the user cannot see
+  while the one on screen stayed as it was.
+
+  Targets are now looked up in the scene being merged into, which is the only
+  place a snapshot's objects can be: the extractor records `scene.objects` and
+  nothing else. Parent references and modifier object references resolve the
+  same way, and a reference pointing outside the scene now fails with that
+  reason rather than silently binding to the wrong object.
+
+  Object renaming still checks `bpy.data.objects`, deliberately. Blender
+  enforces name uniqueness across the whole file, so a collision with an
+  object in another scene would still silently produce "Name.001".
+
+### Added
+- **Merge applies settings on an existing modifier.** Changing a Subsurf
+  level, a Bevel width or switching a modifier off in the viewport is now
+  written back, including parameters that hold an object reference such as a
+  Mirror target. Previously the whole modifier stack was reported and never
+  applied, so resolving a modifier conflict left the scene untouched.
+
+  Adding, removing, retyping and reordering remain unapplicable, and now say
+  why rather than giving the generic reason. A snapshot records an added
+  modifier as the single string `SUBSURF(Subdivision)` with no parameters, so
+  creating one from that would quietly give it defaults and report success.
+  Writing the wrong thing is worse than reporting it.
+
+### Changed
+- **The three snapshot fields in the merge panel are dropdowns.** They were
+  free text, so a typo or a half-remembered label gave "Snapshots not found"
+  and the only way to recover was to read the exact spelling off the history
+  panel. They now list the saved snapshots, newest first and with their
+  timestamps, in the same order the Snapshot History panel draws them.
+
 ## 0.8.3 (2026-09-12)
 
 ### Removed

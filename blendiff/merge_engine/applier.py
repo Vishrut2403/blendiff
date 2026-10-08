@@ -46,6 +46,7 @@ from .property_appliers import (
 	PATH_STRUCTURAL,
 	apply_property,
 	find_applier,
+	scene_object,
 	unsupported_reason,
 )
 
@@ -219,10 +220,10 @@ class Applier:
 
 		# Structural decisions come first: deleting the object makes every
 		# other write on it meaningless.
-		if self._apply_structural(proposal, changes, name, result):
+		if self._apply_structural(proposal, changes, name, result, context):
 			return
 
-		obj = self._find_object(proposal)
+		obj = self._find_object(proposal, context)
 		if obj is None:
 			result.missing_targets.append(name)
 			log.warning("Object %r not found in scene, skipping %d change(s).",
@@ -291,6 +292,7 @@ class Applier:
 		changes: list[tuple[str, Any]],
 		name: str,
 		result: ApplyResult,
+		context: Any,
 	) -> bool:
 		"""
 		Act on structural decisions. Returns True when the object is gone.
@@ -306,7 +308,7 @@ class Applier:
 				continue
 
 			if value in ("removed", "deleted"):
-				if self._remove_object(proposal, name):
+				if self._remove_object(proposal, name, context):
 					result.applied.append(ChangeOutcome(name, path, "removed object"))
 				else:
 					result.skipped.append(ChangeOutcome(
@@ -356,27 +358,29 @@ class Applier:
 
 	# Object lookup and removal
 
-	def _find_object(self, proposal: MergeProposal) -> Optional[Any]:
+	def _find_object(self, proposal: MergeProposal, context: Any) -> Optional[Any]:
 		"""
-		Locate the live object for a proposal.
+		Locate the live object for a proposal, within the scene being merged.
 
 		The proposal names the object as it appears in the newer snapshot, but
 		the scene being merged into may still use the base-snapshot name when
-		the rename came from the other side — so both are tried.
-		"""
-		import bpy
+		the rename came from the other side, so both are tried.
 
-		obj = bpy.data.objects.get(proposal.object_name)
+		See `scene_object`: searching `bpy.data.objects` instead would let a
+		library object sharing the name win, and the merge would write to
+		something outside the scene the snapshots describe.
+		"""
+		obj = scene_object(context, proposal.object_name)
 		if obj is not None:
 			return obj
 		if proposal.previous_name:
-			return bpy.data.objects.get(proposal.previous_name)
+			return scene_object(context, proposal.previous_name)
 		return None
 
-	def _remove_object(self, proposal: MergeProposal, name: str) -> bool:
+	def _remove_object(self, proposal: MergeProposal, name: str, context: Any) -> bool:
 		import bpy
 
-		obj = self._find_object(proposal)
+		obj = self._find_object(proposal, context)
 		if obj is None:
 			return False
 		bpy.data.objects.remove(obj, do_unlink=True)

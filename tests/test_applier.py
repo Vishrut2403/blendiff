@@ -22,6 +22,7 @@ from fake_bpy import (
 	FakeCollection,
 	FakeData,
 	FakeMaterial,
+	FakeModifier,
 	FakeObject,
 	FakeSlot,
 	FakeStruct,
@@ -732,3 +733,138 @@ class TestRestBones:
 		]))
 		assert abs(rig.data.edit_bones["Head"].roll - 0.25) < 1e-6
 		assert rig.pose.bones["Head"].location == (1.0, 0.0, 0.0)
+
+
+class TestMergeTargetsStayInsideTheScene:
+	"""
+	A merge must write to the scene's object, never to a namesake elsewhere.
+
+	The applier used to resolve targets through `bpy.data.objects`, which holds
+	every object in the file: other scenes, and objects linked from a library.
+	Two datablocks can carry the same name when one is linked, and
+	`bpy.data.objects.get` returns whichever it holds, so a merge could write
+	to an object the user cannot see while the one on screen stayed unchanged.
+
+	A snapshot only ever records the scene's own objects, so the scene is the
+	only place a merge target can legitimately be.
+	"""
+
+	def test_object_outside_the_scene_is_not_written_to(self, bpy):
+		stray = FakeObject("Cube")
+		stray.location = [0.0, 0.0, 0.0]
+		bpy.data.objects.add(stray, in_scene=False)
+
+		result = _apply(_proposal("Cube", [("transform.location", [5.0, 0.0, 0.0])]))
+
+		assert result.missing_targets == ["Cube"]
+		assert tuple(stray.location) == (0.0, 0.0, 0.0), "wrote to an object outside the scene"
+
+	def test_the_scene_object_wins_over_a_namesake(self, bpy):
+		stray = FakeObject("Cube")
+		stray.location = [0.0, 0.0, 0.0]
+		bpy.data.objects.add(stray, in_scene=False)
+
+		# Added second, so a bpy.data lookup could return either one.
+		in_scene = FakeObject("Cube")
+		in_scene.location = [0.0, 0.0, 0.0]
+		bpy.context.scene.objects.append(in_scene)
+
+		result = _apply(_proposal("Cube", [("transform.location", [5.0, 0.0, 0.0])]))
+
+		assert result.applied, result.failed
+		assert tuple(in_scene.location) == (5.0, 0.0, 0.0)
+		assert tuple(stray.location) == (0.0, 0.0, 0.0)
+
+	def test_parenting_to_an_object_outside_the_scene_fails(self, cube, bpy):
+		bpy.data.objects.add(FakeObject("Rig"), in_scene=False)
+
+		result = _apply(_proposal("Cube", [("parent.parent_name", "Rig")]))
+
+		assert not result.applied
+		assert "not found in the scene" in result.failed[0].detail
+
+
+class TestModifierSettings:
+	"""
+	Settings on a modifier that already exists are applied; the rest is not.
+
+	Modifier stacks were reported and never written, so resolving a conflict on
+	a Subsurf level left the scene untouched while the merge claimed success
+	for the proposal. Settings are the common case: somebody changed a level, a
+	width, or switched a modifier off.
+
+	Adding, removing, retyping and reordering stay out. The snapshot records an
+	added modifier as the single string "SUBSURF(Subdivision)" with no
+	parameters, so building one from that would give it defaults and call it a
+	merge.
+	"""
+
+	@pytest.fixture
+	def cube_with_subsurf(self, cube):
+		cube.modifiers.append(FakeModifier("Subdivision", "SUBSURF", levels=1))
+		return cube
+
+	def test_param_is_written(self, cube_with_subsurf):
+		result = _apply(_proposal("Cube", [("modifiers[0].levels", 3)]))
+		assert result.applied, result.failed
+		assert cube_with_subsurf.modifiers[0].levels == 3
+
+	def test_visibility_toggle_is_written(self, cube_with_subsurf):
+		result = _apply(_proposal("Cube", [("modifiers[0].show_viewport", False)]))
+		assert result.applied, result.failed
+		assert cube_with_subsurf.modifiers[0].show_viewport is False
+
+	def test_rename_is_written(self, cube_with_subsurf):
+		_apply(_proposal("Cube", [("modifiers[0].name", "Subdiv")]))
+		assert cube_with_subsurf.modifiers[0].name == "Subdiv"
+
+	def test_vector_param_is_written(self, cube):
+		cube.modifiers.append(
+			FakeModifier("Array", "ARRAY", relative_offset_displace=[1.0, 0.0, 0.0])
+		)
+		_apply(_proposal("Cube", [("modifiers[0].relative_offset", [0.0, 2.0, 0.0])]))
+		assert cube.modifiers[0].relative_offset_displace == [0.0, 2.0, 0.0]
+
+	def test_object_reference_resolves_within_the_scene(self, cube, bpy):
+		target = FakeObject("Mirror_Target")
+		bpy.data.objects.add(target)
+		cube.modifiers.append(FakeModifier("Mirror", "MIRROR"))
+
+		result = _apply(_proposal("Cube", [("modifiers[0].object_name", "Mirror_Target")]))
+
+		assert result.applied, result.failed
+		assert cube.modifiers[0].object is target
+
+	def test_object_reference_outside_the_scene_fails(self, cube, bpy):
+		bpy.data.objects.add(FakeObject("Elsewhere"), in_scene=False)
+		cube.modifiers.append(FakeModifier("Mirror", "MIRROR"))
+
+		result = _apply(_proposal("Cube", [("modifiers[0].object_name", "Elsewhere")]))
+
+		assert not result.applied
+		assert "not found in the scene" in result.failed[0].detail
+
+	def test_empty_slot_fails_rather_than_guessing(self, cube):
+		result = _apply(_proposal("Cube", [("modifiers[2].levels", 3)]))
+		assert not result.applied
+		assert "no modifier at slot 2" in result.failed[0].detail
+
+	def test_wrong_modifier_type_in_the_scene_is_refused(self, cube):
+		# The snapshot described a Subsurf here; the scene has a Bevel.
+		cube.modifiers.append(FakeModifier("Bevel", "BEVEL", width=0.1))
+		result = _apply(_proposal("Cube", [("modifiers[0].levels", 3)]))
+		assert not result.applied
+		assert "not a known setting of a BEVEL" in result.failed[0].detail
+
+	def test_structural_changes_are_still_reported_not_applied(self, cube_with_subsurf):
+		result = _apply(_proposal("Cube", [
+			("modifiers[1]", "BEVEL(Bevel)"),
+			("modifiers[0].type", "BEVEL"),
+			("modifiers.order", ["Bevel", "Subdivision"]),
+		]))
+		assert not result.applied
+		assert len(result.skipped) == 3
+		reasons = " ".join(outcome.detail for outcome in result.skipped)
+		assert "does not record its settings" in reasons
+		assert "re-create it manually" in reasons
+		assert "by hand" in reasons

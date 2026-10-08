@@ -48,6 +48,28 @@ class FakeData:
 		self.__dict__.update(kwargs)
 
 
+class FakeModifier:
+	"""
+	One entry in obj.modifiers.
+
+	Only the fields the merge applier writes: the common ones every modifier
+	has, plus whichever type-specific attributes a test sets up. Attributes are
+	plain, so setattr behaves as it does on a real modifier, and a write to an
+	attribute the type does not have is caught by the applier before it gets
+	here.
+	"""
+
+	def __init__(self, name: str, mod_type: str = "SUBSURF", **params):
+		self.name = name
+		self.type = mod_type
+		self.show_viewport = True
+		self.show_render = True
+		self.is_active = True
+		self.object = None
+		for key, value in params.items():
+			setattr(self, key, value)
+
+
 class FakeObject:
 	def __init__(
 		self,
@@ -72,6 +94,7 @@ class FakeObject:
 		self.parent_bone = ""
 		self.matrix_world = FakeMatrix(name)
 		self.material_slots: list[FakeSlot] = []
+		self.modifiers: list["FakeModifier"] = []
 		self.library = None
 		self.override_library = None
 		self._props: dict[str, Any] = {}
@@ -297,20 +320,32 @@ class FakeCollection:
 class FakeIDMap:
 	"""Mimics bpy.data.objects / .materials / .collections."""
 
-	def __init__(self):
+	def __init__(self, scene_objects=None):
 		self._items: dict[str, Any] = {}
+		#: When set, adding also places the item in the scene, so that
+		#: bpy.data and scene membership agree by default.
+		self._scene_objects = scene_objects
 
 	def get(self, name, default=None):
 		return self._items.get(name, default)
 
-	def add(self, item):
+	def add(self, item, in_scene: bool = True):
+		"""
+		Register the item. Pass in_scene=False for something that exists in the
+		file but is not in the scene, such as an object linked from a library
+		or one belonging to another scene.
+		"""
 		self._items[item.name] = item
+		if in_scene and self._scene_objects is not None and item not in self._scene_objects:
+			self._scene_objects.append(item)
 		return item
 
 	def remove(self, item, do_unlink: bool = False):
 		for collection in list(getattr(item, "_collections", [])):
 			collection.objects.unlink(item)
 		self._items.pop(item.name, None)
+		if self._scene_objects is not None and item in self._scene_objects:
+			self._scene_objects.remove(item)
 
 	def _rename(self, old: str, new: str) -> None:
 		if old in self._items:
@@ -352,16 +387,33 @@ class FakeViewLayer:
 		self.objects = FakeViewLayerObjects()
 
 
+class FakeSceneObjects(list):
+	"""
+	scene.objects, which is a bpy_prop_collection rather than a list.
+
+	It is subscripted and iterated like a list, and it also answers .get(name).
+	The list behaviour is what the tests use; the .get is what the merge
+	applier uses to resolve a target to the scene rather than to the whole
+	file, so the fake has to offer both or the applier cannot be tested.
+	"""
+
+	def get(self, name, default=None):
+		for obj in self:
+			if obj.name == name:
+				return obj
+		return default
+
+
 class FakeScene:
 	def __init__(self, name="Scene"):
 		self.name = name
 		self.collection = FakeCollection("Scene Collection")
-		self.objects: list[FakeObject] = []
+		self.objects: FakeSceneObjects = FakeSceneObjects()
 
 
 class FakeBpyData:
-	def __init__(self):
-		self.objects = FakeIDMap()
+	def __init__(self, scene_objects=None):
+		self.objects = FakeIDMap(scene_objects)
 		self.materials = FakeIDMap()
 		self.collections = FakeIDMap()
 		self.filepath = ""
@@ -407,10 +459,10 @@ def install(scene: Optional[FakeScene] = None) -> types.ModuleType:
 
 	Resets all state, so each test starts from an empty scene.
 	"""
-	global _DATA
-	_DATA = FakeBpyData()
-
 	scene = scene or FakeScene()
+
+	global _DATA
+	_DATA = FakeBpyData(scene.objects)
 	module = types.ModuleType("bpy")
 	module.data = _DATA
 	module.context = FakeContext(scene)

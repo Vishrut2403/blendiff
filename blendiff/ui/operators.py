@@ -343,7 +343,7 @@ class BLENDIFF_OT_RunThreeWayDiff(bpy.types.Operator):
 		b_label    = wm.blendiff_b_label.strip()
 
 		if not all([base_label, a_label, b_label]):
-			self.report({"ERROR"}, "BlenDiff: Please fill in Base, Version A and Version B labels.")
+			self.report({"ERROR"}, "BlenDiff: Pick a snapshot for Base, Version A and Version B.")
 			return {"CANCELLED"}
 
 		mgr = SidecarManager(bpy.data.filepath)

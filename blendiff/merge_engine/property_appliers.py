@@ -113,6 +113,23 @@ def _set_nested(target: Any, dotted: str, value: Any) -> None:
 
 # Writers
 
+def scene_object(context: Any, name: str) -> Any:
+	"""
+	Find an object by name among the objects of the scene being merged into.
+
+	Not `bpy.data.objects`, which holds every object in the file including
+	those linked from a library and those in other scenes. Two datablocks can
+	carry the same name when one comes from a library, and `bpy.data.objects`
+	returns whichever it finds, so a merge could write to an object the user
+	cannot even see. A snapshot only ever records the scene's own objects, so
+	the scene is the only place a merge target can legitimately be.
+	"""
+	import bpy
+
+	scene = getattr(context, "scene", None) or bpy.context.scene
+	return scene.objects.get(name)
+
+
 def _apply_name(obj: Any, path: str, value: Any, context: Any) -> None:
 	"""
 	Rename the object.
@@ -254,9 +271,9 @@ def _apply_parent(obj: Any, path: str, value: Any, context: Any) -> None:
 		if value is None:
 			obj.parent = None
 		else:
-			parent = bpy.data.objects.get(value)
+			parent = scene_object(context, value)
 			if parent is None:
-				raise ValueError(f"Parent object {value!r} not found.")
+				raise ValueError(f"Parent object {value!r} not found in the scene.")
 			if parent is obj:
 				raise ValueError("An object cannot be its own parent.")
 			obj.parent = parent
@@ -417,6 +434,83 @@ def _apply_light(obj: Any, path: str, value: Any, context: Any) -> None:
 	_set_nested(obj.data, attr, value)
 
 
+#: modifiers[3].levels -> index 3, key "levels"
+#
+# `.type` is excluded so it stays unapplicable and reports its reason. Matching
+# it here would make can_apply() claim the merge can retype a modifier, and the
+# write would then fail at apply time instead of being skipped cleanly.
+_MODIFIER_PROP = re.compile(r"^modifiers\[(\d+)\]\.(?!type$)([A-Za-z_]\w*)$")
+
+#: Fields every modifier has, named identically in the snapshot and in bpy.
+_MODIFIER_COMMON = ("name", "show_viewport", "show_render")
+
+
+def _modifier_param_attr(mod_type: str, key: str) -> Optional[str]:
+	"""
+	bpy attribute behind a snapshot param key, for one modifier type.
+
+	Built from the extractor's own table so the two cannot drift: it records
+	(bpy_attr, snapshot_key) per type, and this reads it backwards. Looking the
+	key up against the *live* modifier's type is also the type guard. If the
+	modifier in the scene is not the type the snapshot described, its keys will
+	not be in that type's table and the write is refused instead of setting
+	some unrelated attribute.
+	"""
+	from ..extractor.modifier_extractor import _MOD_PROPS
+
+	for bpy_attr, output_key in _MOD_PROPS.get(mod_type, []):
+		if output_key == key:
+			return bpy_attr
+	return None
+
+
+def _apply_modifier(obj: Any, path: str, value: Any, context: Any) -> None:
+	"""
+	Write one setting on an existing modifier.
+
+	Only settings on a modifier that is already there. Adding, removing,
+	retyping and reordering stay unapplicable on purpose: the snapshot records
+	an added modifier as the single string "SUBSURF(Subdivision)" with no
+	parameters, so creating one from that would silently give it defaults and
+	report success. Reporting it and letting the user add it is honest; writing
+	the wrong thing is not.
+	"""
+	match = _MODIFIER_PROP.match(path)
+	if match is None:
+		raise ValueError(f"Unsupported modifier property {path!r}")
+
+	index, key = int(match.group(1)), match.group(2)
+	if index >= len(obj.modifiers):
+		raise ValueError(
+			f"{obj.name!r} has no modifier at slot {index}; the stack differs "
+			f"from the snapshot."
+		)
+	mod = obj.modifiers[index]
+
+	if key in _MODIFIER_COMMON:
+		setattr(mod, key, value)
+		return
+
+	if key == "object_name":
+		# The parameter holds an object reference, stored as a name.
+		if value is None:
+			mod.object = None
+			return
+		target = scene_object(context, value)
+		if target is None:
+			raise ValueError(f"Modifier target {value!r} not found in the scene.")
+		mod.object = target
+		return
+
+	attr = _modifier_param_attr(mod.type, key)
+	if attr is None:
+		raise ValueError(
+			f"{key!r} is not a known setting of a {mod.type} modifier; "
+			f"slot {index} is {mod.type} in this scene."
+		)
+	setattr(mod, attr, value)
+
+
 # Registry
 #
 # Order matters only in that the first match wins; patterns are disjoint.
@@ -449,6 +543,7 @@ REGISTRY: tuple[ApplierEntry, ...] = (
 	),
 	ApplierEntry(re.compile(r"^camera\.[^.]+$"), _apply_camera, "Camera data"),
 	ApplierEntry(re.compile(r"^light\.[^.]+$"), _apply_light, "Light data"),
+	ApplierEntry(_MODIFIER_PROP, _apply_modifier, "Modifier setting"),
 )
 
 
@@ -472,8 +567,13 @@ UNSUPPORTED_REASONS: tuple[tuple[re.Pattern, str], ...] = (
 	 "Custom shapes reference another object; assign it by hand."),
 	(re.compile(r"^mesh\."),
 	 "Mesh geometry is summarised, not stored — BlenDiff cannot rebuild it."),
-	(re.compile(r"^modifiers\."),
-	 "Modifier stacks are not yet applicable; re-create the modifier manually."),
+	(re.compile(r"^modifiers\.order$"),
+	 "Reordering a modifier stack must be done by hand."),
+	(re.compile(r"^modifiers\[\d+\]\.type$"),
+	 "Changing a modifier's type replaces it; re-create it manually."),
+	(re.compile(r"^modifiers\[\d+\]$"),
+	 "Adding or removing a modifier is not applicable; the snapshot does not "
+	 "record its settings."),
 	(re.compile(r"^constraints?\."),
 	 "Constraint stacks are not yet applicable; re-create the constraint manually."),
 	(re.compile(r"^fcurves?\."),
