@@ -225,3 +225,51 @@ def stamp(scene: dict, domains: Iterable[str]) -> dict:
 	scene["captured_domains"] = sorted(set(domains))
 	scene.setdefault("transform_space", TRANSFORM_SPACE_LOCAL)
 	return scene
+
+
+#: Visibility and display switches that live directly on the object.
+#
+# Only hide_viewport and hide_render were captured, which left every other way
+# of making an object behave differently invisible. The ray visibility flags
+# matter most: switching off visible_shadow removes an object's shadow while it
+# stays in frame, and nothing in a diff would have said so.
+#
+# Flat keys rather than a nested dict, matching the two that were already
+# here, so the comparison is the same optional-field rule and an older
+# snapshot missing them reports nothing rather than reporting them all as new.
+VISIBILITY_FLAGS = (
+	"hide_select",
+	"show_in_front",
+	"show_wire",
+	"display_type",
+	"visible_camera",
+	"visible_diffuse",
+	"visible_glossy",
+	"visible_transmission",
+	"visible_volume_scatter",
+	"visible_shadow",
+	"is_holdout",
+	"is_shadow_catcher",
+)
+
+
+#: Collection switches, captured alongside its name and contents.
+#
+# A collection held only its name, path, children and objects, so switching a
+# whole collection off for render changed the shot completely and BlenDiff
+# reported nothing. "Why is this not in my render?" is usually answered by one
+# of these.
+#
+# exclude and holdout live on the view layer's LayerCollection rather than on
+# the Collection itself, which is why they are listed apart.
+COLLECTION_FLAGS = (
+	"hide_viewport",
+	"hide_render",
+	"hide_select",
+	"color_tag",
+)
+
+COLLECTION_LAYER_FLAGS = (
+	"exclude",
+	"holdout",
+)

@@ -34,6 +34,8 @@ from typing import Any, Callable, Optional
 
 from .armature_applier import REST_BONE_PATH as _REST_BONE_EDIT
 
+from ..data_model.schema import VISIBILITY_FLAGS
+
 log = logging.getLogger(__name__)
 
 #: Structural markers the merge engine uses instead of real property paths.
@@ -528,6 +530,24 @@ def _apply_modifier(obj: Any, path: str, value: Any, context: Any) -> None:
 	setattr(mod, attr, value)
 
 
+def _apply_visibility_flag(obj: Any, path: str, value: Any, context: Any) -> None:
+	"""
+	Write one of the display or ray visibility switches.
+
+	These are plain attributes on the object, so the write is direct. They are
+	guarded by the same existence check the extractor uses: the ray visibility
+	flags come from Cycles and are not present on every build, and setting an
+	attribute that is not there would create a stray Python attribute that
+	looks applied and does nothing.
+	"""
+	if not hasattr(obj, path):
+		raise ValueError(
+			f"{obj.name!r} has no {path!r}; this Blender build does not expose it."
+		)
+	current = getattr(obj, path)
+	setattr(obj, path, value if isinstance(current, str) else bool(value))
+
+
 #: mesh.shape_keys["Smile"].value -> key "Smile", setting "value"
 #
 # Only the settings that are a plain write. Matching every field would make
@@ -715,6 +735,11 @@ REGISTRY: tuple[ApplierEntry, ...] = (
 	ApplierEntry(re.compile(r"^visible$"), _apply_visible, "Viewport visibility"),
 	ApplierEntry(re.compile(r"^hide_viewport$"), _apply_hide_viewport, "Viewport visibility"),
 	ApplierEntry(re.compile(r"^hide_render$"), _apply_hide_render, "Render visibility"),
+	ApplierEntry(
+		re.compile("^(" + "|".join(VISIBILITY_FLAGS) + ")$"),
+		_apply_visibility_flag,
+		"Display or ray visibility",
+	),
 	ApplierEntry(re.compile(r"^collection_path$"), _apply_collection_path, "Collection"),
 	ApplierEntry(re.compile(r"^collection_paths$"), _apply_collection_paths, "Collection membership"),
 	ApplierEntry(re.compile(r"^material_slots\[\d+\](\.name)?$"), _apply_material_slot, "Material slot"),

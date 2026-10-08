@@ -204,6 +204,12 @@ class DiffEngine:
 		for key in ("hide_render", "visible_in_viewlayer"):
 			changes.extend(self._compare_optional(obj_a, obj_b, key))
 
+		# The rest of the visibility and display switches. Each is compared
+		# only when both snapshots recorded it, so a snapshot taken before
+		# they were captured reports nothing rather than reporting them all.
+		for key in schema.VISIBILITY_FLAGS:
+			changes.extend(self._compare_optional(obj_a, obj_b, key))
+
 		if compare_transforms:
 			changes.extend(self._compare_transforms(
 				obj_a.get("transform", {}),
@@ -409,6 +415,10 @@ class DiffEngine:
 
 	def _compare_collections(self, col_a: dict, col_b: dict) -> list[PropertyChange]:
 		changes: list[PropertyChange] = []
+
+		# Visibility switches, each only when both snapshots recorded it.
+		for key in schema.COLLECTION_FLAGS + schema.COLLECTION_LAYER_FLAGS:
+			changes.extend(self._compare_optional(col_a, col_b, key))
 
 		for key in ("children", "objects"):
 			set_a = set(col_a.get(key, []))

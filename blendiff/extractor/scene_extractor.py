@@ -144,6 +144,7 @@ class SceneExtractor:
 			# "why is it missing from the render?" — so both are tracked.
 			"hide_render":     bool(getattr(obj, "hide_render", False)),
 			"visible_in_viewlayer": cls._visible_in_viewlayer(obj),
+			**cls._extract_visibility_flags(obj),
 			"parent":          None,
 			"camera_data":     None,
 			"light_data":      None,
@@ -340,9 +341,73 @@ class SceneExtractor:
 			"children": [c.name for c in collection.children],
 			"objects":  [o.name for o in collection.objects],
 		}
+		node.update(cls._extract_collection_flags(collection))
 		accumulator[path] = node
 		for child in collection.children:
 			cls._walk_collection(child, path, accumulator)
+
+	@staticmethod
+	def _extract_visibility_flags(obj) -> dict:
+		"""
+		Every display and ray visibility switch the object exposes.
+
+		Read with getattr because the ray visibility flags are Cycles
+		properties: they exist on current Blender but an older build, or a
+		build without Cycles, simply will not have them. A flag that is not
+		there is left out rather than guessed at, so it compares as "not
+		captured" instead of as a value nobody set.
+		"""
+		flags = {}
+		for name in schema.VISIBILITY_FLAGS:
+			if hasattr(obj, name):
+				value = getattr(obj, name)
+				flags[name] = value if isinstance(value, str) else bool(value)
+		return flags
+
+
+	@classmethod
+	def _extract_collection_flags(cls, collection: Any) -> dict:
+		"""
+		A collection's visibility switches, including the view layer's.
+
+		hide_viewport and hide_render sit on the collection and travel with
+		the file. exclude and holdout sit on the view layer's LayerCollection,
+		so they are per view layer rather than per collection, and are read
+		from the active one.
+
+		Anything absent is left out rather than defaulted, so it compares as
+		"not captured" instead of as a value nobody set.
+		"""
+		flags = {}
+		for name in schema.COLLECTION_FLAGS:
+			if hasattr(collection, name):
+				value = getattr(collection, name)
+				flags[name] = value if isinstance(value, str) else bool(value)
+
+		layer = cls._find_layer_collection(collection)
+		if layer is not None:
+			for name in schema.COLLECTION_LAYER_FLAGS:
+				if hasattr(layer, name):
+					flags[name] = bool(getattr(layer, name))
+		return flags
+
+	@staticmethod
+	def _find_layer_collection(collection: Any) -> Any:
+		"""The active view layer's entry for a collection, or None."""
+		try:
+			import bpy
+
+			stack = [bpy.context.view_layer.layer_collection]
+		except Exception:
+			return None
+
+		while stack:
+			node = stack.pop()
+			if getattr(node, "collection", None) is collection:
+				return node
+			stack.extend(node.children)
+		return None
+
 
 	# Helpers
 

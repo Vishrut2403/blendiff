@@ -47,6 +47,35 @@
   object in another scene would still silently produce "Name.001".
 
 ### Added
+- **Object display and ray visibility switches are captured, compared and
+  merged.** Only `hide_viewport` and `hide_render` were recorded, so every
+  other way of making an object behave differently was invisible. Switching
+  off `visible_shadow` removes an object's shadow while it stays in frame,
+  and a diff said nothing had changed.
+
+  Now also recorded: `visible_camera`, `visible_diffuse`, `visible_glossy`,
+  `visible_transmission`, `visible_volume_scatter`, `visible_shadow`,
+  `is_holdout`, `is_shadow_catcher`, `hide_select`, `display_type`,
+  `show_in_front` and `show_wire`. All of them merge back, since each is a
+  plain attribute on the object.
+
+  The ray visibility flags come from Cycles and are absent on some builds. A
+  flag that is not there is left out rather than guessed at, and applying one
+  the build does not expose fails rather than quietly creating a stray
+  attribute that looks applied and does nothing.
+
+- **Collection visibility is captured and compared.** A collection held only
+  its name, path, children and objects. Turning a whole collection off for
+  render changed the shot completely and BlenDiff reported a clean scene,
+  which is unfortunate given "why is this not in my render?" is usually
+  answered by one of these switches.
+
+  Now recorded: `hide_viewport`, `hide_render`, `hide_select` and `color_tag`
+  from the collection, plus `exclude` and `holdout` from the active view
+  layer's entry for it. Collection targets are reported rather than written
+  by the applier, as they were before, so these show in a diff but are not
+  merged.
+
 - **Restore a snapshot.** BlenDiff kept history and could say what changed but
   offered no way to go back, which is the thing people install a version
   control tool for. Snapshot History now has a restore button beside each

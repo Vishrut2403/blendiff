@@ -40,7 +40,10 @@ Apply Merge stays disabled until nothing is left undecided.
 
 ## What it compares
 
-- **Objects**: position, rotation, scale, visibility, parenting and custom properties
+- **Objects**: position, rotation, scale, parenting and custom properties
+- **Visibility**: viewport and render switches, selectability, display mode,
+  and the per-ray flags that decide whether something casts a shadow or shows
+  up in reflections
 - **Meshes**: a moved vertex, a subdivided face or a re-unwrap, caught by comparing
   content digests rather than storing the geometry
 - **Materials**: node graphs, node by node, including rewired links and image names
@@ -54,7 +57,8 @@ Apply Merge stays disabled until nothing is left undecided.
 - **Animation**: keyframe counts, frame ranges, interpolation, drivers and NLA tracks
 - **Scene settings**: render engine, resolution, sampling, output format, colour
   management, world background, cameras and lights
-- **Collections**: which objects belong where
+- **Collections**: which objects belong where, and whether a collection is
+  hidden, excluded or set to holdout
 
 Renames are tracked properly. Objects carry a hidden id, so renaming `Cube` to
 `Body_LOW` stays one modified object with its other changes intact.
@@ -121,7 +125,7 @@ would then discard.
 | Custom properties | Adding, removing or retyping a modifier |
 | Camera and light settings | |
 | Material slot assignment | |
-| Modifier settings and stack order | |
+| Modifier settings and stack order | Collection visibility |
 | Geometry nodes inputs | Swapping a node group |
 | Shape key value, mute, slider range | A sculpted shape key |
 

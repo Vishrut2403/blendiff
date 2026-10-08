@@ -1620,6 +1620,96 @@ def test_shape_key_value_merges_back():
 	check_eq(round(smile.value, 3), 0.6, "value taken from A")
 
 
+# Visibility switches
+#
+# These need real bpy twice over: the ray visibility flags come from Cycles
+# and only exist on a real build, and the collection ones include exclude and
+# holdout, which live on the view layer rather than on the collection.
+
+@test
+def test_object_ray_visibility_is_extracted():
+	reset_scene()
+	bpy.ops.mesh.primitive_cube_add()
+	cube = bpy.context.active_object
+	cube.visible_shadow = False
+	cube.is_shadow_catcher = True
+	cube.display_type = "WIRE"
+
+	obj = extract()["objects"]["Cube"]
+	check_eq(obj["visible_shadow"], False, "visible_shadow")
+	check_eq(obj["is_shadow_catcher"], True, "is_shadow_catcher")
+	check_eq(obj["display_type"], "WIRE", "display_type")
+
+
+@test
+def test_collection_visibility_is_extracted():
+	reset_scene()
+	props = bpy.data.collections.new("Props")
+	bpy.context.scene.collection.children.link(props)
+	props.hide_render = True
+
+	col = extract()["collections"]["Scene Collection/Props"]
+	check_eq(col["hide_render"], True, "collection hide_render")
+	check_eq(col["hide_viewport"], False, "collection hide_viewport")
+	check_eq(col["exclude"], False, "view layer exclude")
+
+
+@test
+def test_excluding_a_collection_is_extracted():
+	reset_scene()
+	props = bpy.data.collections.new("Props")
+	bpy.context.scene.collection.children.link(props)
+	bpy.context.view_layer.layer_collection.children["Props"].exclude = True
+
+	col = extract()["collections"]["Scene Collection/Props"]
+	check_eq(col["exclude"], True, "view layer exclude")
+
+
+@test
+def test_turning_a_collection_off_for_render_is_diffed():
+	reset_scene()
+	props = bpy.data.collections.new("Props")
+	bpy.context.scene.collection.children.link(props)
+	before = extract()
+
+	props.hide_render = True
+	after = extract()
+
+	diffs = DiffEngine().compare(before, after).collection_diffs
+	paths = [c.property_path for d in diffs for c in d.changes]
+	check_eq(paths, ["hide_render"], "collection render visibility reported")
+
+
+@test
+def test_ray_visibility_merges_back():
+	from blendiff.data_model.conflict import Resolution
+	from blendiff.merge_engine.applier import Applier
+	from blendiff.merge_engine.merge_engine import MergeEngine
+
+	reset_scene()
+	bpy.ops.mesh.primitive_cube_add()
+	cube = bpy.context.active_object
+	base = extract()
+
+	cube.visible_shadow = False
+	version_a = extract()
+
+	cube.visible_shadow = True
+	version_b = extract()
+
+	three_way = MergeEngine().three_way_diff(
+		base=base, version_a=version_a, version_b=version_b,
+		base_label="base", label_a="A", label_b="B",
+	)
+	for proposal in three_way.proposals:
+		for conflict in proposal.conflicts:
+			conflict.resolution = Resolution.USE_A
+
+	result = Applier().apply_all(three_way, bpy.context)
+	check_eq(result.failed, [], "nothing failed to apply")
+	check_eq(cube.visible_shadow, False, "shadow visibility taken from A")
+
+
 def main() -> int:
 	passed, failed = 0, []
 

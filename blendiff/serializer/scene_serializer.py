@@ -3,7 +3,11 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from ..data_model import schema
 from ..extractor.coerce import to_jsonable
+
+#: Collection switches, including the view layer's own.
+_COLLECTION_FLAG_KEYS = schema.COLLECTION_FLAGS + schema.COLLECTION_LAYER_FLAGS
 
 _FLOAT_PRECISION = 6
 
@@ -91,6 +95,7 @@ class SceneSerializer:
 			"fcurves":          obj.get("fcurves", []),
 			"drivers":          obj.get("drivers", []),
 			"nla_tracks":       to_jsonable(obj.get("nla_tracks", [])),
+			**self._carry_flags(obj, schema.VISIBILITY_FLAGS),
 		}
 
 	def _serialize_transform(self, t: dict) -> dict:
@@ -171,11 +176,36 @@ class SceneSerializer:
 		return result
 
 	def _serialize_collection(self, col: dict) -> dict:
-		return {
+		result = {
 			"name":     col["name"],
 			"path":     col["path"],
 			"children": list(col.get("children", [])),
 			"objects":  list(col.get("objects", [])),
+		}
+		result.update(self._carry_flags(col, _COLLECTION_FLAG_KEYS))
+		return result
+
+	@staticmethod
+	def _carry_flags(source: dict, names: tuple) -> dict:
+		"""
+		Pass visibility switches through, keeping absent ones absent.
+
+		This serializer rebuilds each dict from an explicit list of fields,
+		which is deliberate: it is what stops raw bpy values reaching the
+		sidecar. It also means a field the extractor starts recording goes
+		nowhere until it is named here, which is how the first attempt at
+		these flags silently captured nothing.
+
+		A flag that was not recorded is left out rather than defaulted, so it
+		compares as "not captured" rather than as a value nobody set.
+		"""
+		return {
+			name: (
+				source[name] if isinstance(source[name], str)
+				else bool(source[name])
+			)
+			for name in names
+			if name in source
 		}
 
 	def _vec_to_list(self, value: Any) -> list[float]:

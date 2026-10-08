@@ -1127,3 +1127,31 @@ class TestRenameCollidesPerLibrary:
 
 		assert not result.applied
 		assert "same library" in result.failed[0].detail
+
+
+class TestVisibilityFlagsApply:
+	"""
+	Display and ray visibility switches merge back, because they are plain
+	attribute writes on the object. Unlike collection flags, which the
+	applier reports rather than writes.
+	"""
+
+	def test_a_ray_visibility_flag_is_written(self, cube):
+		cube.visible_shadow = True
+		result = _apply(_proposal("Cube", [("visible_shadow", False)]))
+		assert result.applied, result.failed
+		assert cube.visible_shadow is False
+
+	def test_display_type_is_written(self, cube):
+		cube.display_type = "TEXTURED"
+		_apply(_proposal("Cube", [("display_type", "WIRE")]))
+		assert cube.display_type == "WIRE"
+
+	def test_a_flag_this_build_lacks_fails_rather_than_inventing_one(self, cube):
+		# Ray visibility comes from Cycles and is absent on some builds.
+		# setattr would happily create a stray Python attribute that looks
+		# applied and changes nothing.
+		assert not hasattr(cube, "is_shadow_catcher")
+		result = _apply(_proposal("Cube", [("is_shadow_catcher", True)]))
+		assert not result.applied
+		assert "does not expose it" in result.failed[0].detail
