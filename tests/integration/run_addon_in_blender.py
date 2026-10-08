@@ -561,6 +561,157 @@ except Exception as exc:
 	traceback.print_exc()
 
 
+# Snapshot on save. Registered through the add-on's own register(), so this
+# is the only place the preferences class and the handler are exercised the
+# way Blender installs them.
+
+section("Snapshot on save")
+
+try:
+	from blendiff.ui import autosave
+
+	check("handler installed by register()",
+	      autosave.snapshot_after_save in bpy.app.handlers.save_post, "")
+
+	# AddonPreferences are keyed by bl_idname, which is the add-on's package
+	# name, so they never appear in bpy.types under the class name.
+	prefs_cls = autosave.BLENDIFF_AddonPreferences
+	check("preferences class registered", prefs_cls.is_registered, "")
+	check("preferences keyed by the add-on package",
+	      prefs_cls.bl_idname == autosave.ADDON_PACKAGE, prefs_cls.bl_idname)
+	if prefs_cls is not None:
+		props = prefs_cls.bl_rna.properties
+		check("preference: snapshot_on_save", "snapshot_on_save" in props, "")
+		check("preference: keep_auto_snapshots", "keep_auto_snapshots" in props, "")
+		check("off by default",
+		      props["snapshot_on_save"].default is False, "")
+		check("retention cannot be set to zero",
+		      props["keep_auto_snapshots"].hard_min >= 1,
+		      str(props["keep_auto_snapshots"].hard_min))
+
+	# With preferences unreachable, which is every background run, the
+	# handler must do nothing rather than raise inside a save.
+	before = len(SidecarManager(bpy.data.filepath).list_snapshots())
+	bpy.ops.wm.save_mainfile()
+	after = len(SidecarManager(bpy.data.filepath).list_snapshots())
+	check("save with no preferences takes no snapshot", before == after,
+	      f"{before} -> {after}")
+
+	# And a handler that throws must never break a save.
+	original = autosave._preferences
+	autosave._preferences = lambda: (_ for _ in ()).throw(RuntimeError("boom"))
+	try:
+		res = bpy.ops.wm.save_mainfile()
+		check("a failing handler does not break saving", res == {"FINISHED"}, str(res))
+	finally:
+		autosave._preferences = original
+except Exception as exc:
+	check("snapshot on save", False, f"{type(exc).__name__}: {exc}")
+	import traceback
+	traceback.print_exc()
+
+
+# Deleting snapshots back to back, which is where stale rows showed up.
+
+section("Snapshot deletion refreshes the list")
+
+try:
+	import tempfile as _tempfile
+	from blendiff.ui.operators import _refresh_panels
+
+	folder = _tempfile.mkdtemp(prefix="blendiff-del-")
+	bpy.ops.wm.read_factory_settings(use_empty=True)
+	bpy.ops.mesh.primitive_cube_add()
+	del_path = os.path.join(folder, "del.blend")
+	bpy.ops.wm.save_as_mainfile(filepath=del_path)
+	for name in ("one", "two", "three"):
+		bpy.ops.blendiff.save_snapshot('EXEC_DEFAULT', label=name)
+
+	snapshots = SidecarManager(del_path).list_snapshots()
+	check("three snapshots to work with", len(snapshots) == 3, str(len(snapshots)))
+	doomed = snapshots[0]
+
+	res = bpy.ops.blendiff.delete_snapshot('EXEC_DEFAULT', snapshot_id=doomed.id)
+	check("first delete succeeds", res == {"FINISHED"}, str(res))
+
+	# A row that has not redrawn yet still carries the id just deleted. That
+	# second click used to report "Snapshot not found", which read as a bug in
+	# deleting rather than a panel that had not been told to refresh.
+	res = bpy.ops.blendiff.delete_snapshot('EXEC_DEFAULT', snapshot_id=doomed.id)
+	check("repeating a deleted id is not an error", res == {"FINISHED"}, str(res))
+
+	remaining = SidecarManager(del_path).list_snapshots()
+	check("the repeat removed nothing extra", len(remaining) == 2, str(len(remaining)))
+
+	res = bpy.ops.blendiff.delete_snapshot('EXEC_DEFAULT', snapshot_id=remaining[0].id)
+	check("deleting the next one still works", res == {"FINISHED"}, str(res))
+	check("one snapshot left",
+	      len(SidecarManager(del_path).list_snapshots()) == 1, "")
+
+	# The redraw helper must survive a context with no windows, which is
+	# exactly this background run.
+	_refresh_panels(bpy.context)
+	check("refreshing panels is safe with no window manager", True, "")
+except Exception as exc:
+	check("snapshot deletion", False, f"{type(exc).__name__}: {exc}")
+	import traceback
+	traceback.print_exc()
+
+
+# A sidecar whose history belongs to a different scene.
+
+section("Inherited history")
+
+try:
+	import tempfile as _tempfile
+	from blendiff.ui.operators import _unrelated_history_warning
+
+	folder = _tempfile.mkdtemp(prefix="blendiff-inherit-")
+	reused = os.path.join(folder, "Untitled.blend")
+
+	# One scene, snapshotted, saved.
+	bpy.ops.wm.read_factory_settings(use_empty=True)
+	bpy.ops.mesh.primitive_cube_add()
+	bpy.ops.wm.save_as_mainfile(filepath=reused)
+	bpy.ops.blendiff.save_snapshot('EXEC_DEFAULT', label="old work")
+	bpy.ops.wm.save_mainfile()
+	check("history exists for that path",
+	      len(SidecarManager(reused).list_snapshots()) == 1, "")
+
+	# A different scene saved over the same name inherits that history,
+	# because the sidecar is keyed by path and nothing else.
+	bpy.ops.wm.read_factory_settings(use_empty=True)
+	bpy.ops.mesh.primitive_monkey_add()
+	bpy.ops.wm.save_as_mainfile(filepath=reused)
+
+	manager = SidecarManager(reused)
+	check("the new scene sees the old snapshots",
+	      len(manager.list_snapshots()) == 1, "")
+	warning = _unrelated_history_warning(bpy.context, manager)
+	check("and is warned about it", warning is not None, str(warning))
+	check("the warning says what to do",
+	      warning is not None and "another name" in warning, "")
+
+	# Once this scene has snapshots of its own it owns the history, and the
+	# warning must stop: a false alarm every capture would be worse than none.
+	bpy.ops.blendiff.save_snapshot('EXEC_DEFAULT', label="new work")
+	bpy.ops.wm.save_mainfile()
+	check("quiet once the scene owns its history",
+	      _unrelated_history_warning(bpy.context, SidecarManager(reused)) is None, "")
+
+	# And a file with no history at all must never warn.
+	fresh = os.path.join(folder, "fresh.blend")
+	bpy.ops.wm.read_factory_settings(use_empty=True)
+	bpy.ops.mesh.primitive_cube_add()
+	bpy.ops.wm.save_as_mainfile(filepath=fresh)
+	check("quiet when there is no history",
+	      _unrelated_history_warning(bpy.context, SidecarManager(fresh)) is None, "")
+except Exception as exc:
+	check("inherited history", False, f"{type(exc).__name__}: {exc}")
+	import traceback
+	traceback.print_exc()
+
+
 # 2. CLI over the sidecar this session produced
 
 section("CLI")

@@ -1710,6 +1710,163 @@ def test_ray_visibility_merges_back():
 	check_eq(cube.visible_shadow, False, "shadow visibility taken from A")
 
 
+# Object types that had no data of their own
+#
+# The attribute names are the whole risk here, and only a real Blender can say
+# whether they are right. Each type is built, its data read, one setting
+# changed, and the change demanded back out of the diff.
+
+_OBJECT_DATA_CASES = (
+	("CURVE",   lambda: bpy.ops.curve.primitive_bezier_circle_add(),
+	 "bevel_depth", 0.25, "data.bevel_depth"),
+	("SURFACE", lambda: bpy.ops.surface.primitive_nurbs_surface_sphere_add(),
+	 "resolution_u", 7, "data.resolution_u"),
+	("FONT",    lambda: bpy.ops.object.text_add(),
+	 "body", "Hello", "data.body"),
+	("META",    lambda: bpy.ops.object.metaball_add(),
+	 "resolution", 0.5, "data.resolution"),
+	("LATTICE", lambda: bpy.ops.object.add(type="LATTICE"),
+	 "points_u", 4, "data.points_u"),
+	("VOLUME",  lambda: bpy.ops.object.volume_add(),
+	 "frame_start", 7, "data.frame_start"),
+	("SPEAKER", lambda: bpy.ops.object.speaker_add(),
+	 "volume", 0.25, "data.volume"),
+	("GREASEPENCIL", lambda: bpy.ops.object.grease_pencil_add(),
+	 "stroke_depth_order", "3D", "data.stroke_depth_order"),
+)
+
+
+@test
+def test_every_object_type_records_its_own_data():
+	for kind, make, _attr, _value, _path in _OBJECT_DATA_CASES:
+		reset_scene()
+		make()
+		obj = bpy.context.active_object
+		captured = extract()["objects"][obj.name]["object_data"]
+		check_eq(bool(captured), True, f"{kind} recorded something")
+
+
+@test
+def test_changing_one_setting_is_diffed_for_every_type():
+	for kind, make, attr, value, path in _OBJECT_DATA_CASES:
+		reset_scene()
+		make()
+		obj = bpy.context.active_object
+		before = extract()
+
+		setattr(obj.data, attr, value)
+		after = extract()
+
+		paths = [
+			c.property_path
+			for o in DiffEngine().compare(before, after).modified_objects
+			for c in o.changes
+		]
+		check_eq(paths, [path], f"{kind} reported {path}")
+
+
+@test
+def test_an_empty_records_settings_that_live_on_the_object():
+	reset_scene()
+	bpy.ops.object.empty_add(type="PLAIN_AXES")
+	empty = bpy.context.active_object
+	before = extract()
+	check_eq(before["objects"][empty.name]["object_data"]["display_type"],
+	         "PLAIN_AXES", "empty display type")
+
+	empty.empty_display_size = 3.0
+	after = extract()
+	paths = [
+		c.property_path
+		for o in DiffEngine().compare(before, after).modified_objects
+		for c in o.changes
+	]
+	check_eq(paths, ["data.display_size"], "empty display size reported")
+
+
+@test
+def test_object_data_merges_back():
+	from blendiff.data_model.conflict import Resolution
+	from blendiff.merge_engine.applier import Applier
+	from blendiff.merge_engine.merge_engine import MergeEngine
+
+	reset_scene()
+	bpy.ops.object.text_add()
+	text = bpy.context.active_object
+	base = extract()
+
+	text.data.body = "Merged"
+	version_a = extract()
+
+	text.data.body = "Text"
+	version_b = extract()
+
+	three_way = MergeEngine().three_way_diff(
+		base=base, version_a=version_a, version_b=version_b,
+		base_label="base", label_a="A", label_b="B",
+	)
+	for proposal in three_way.proposals:
+		for conflict in proposal.conflicts:
+			conflict.resolution = Resolution.USE_A
+
+	result = Applier().apply_all(three_way, bpy.context)
+	check_eq(result.failed, [], "nothing failed to apply")
+	check_eq(text.data.body, "Merged", "text body taken from A")
+
+
+@test
+def test_a_datablock_reference_is_reported_but_not_applied():
+	# Pointing a curve at a different taper object is a modelling decision,
+	# and the snapshot holds only a name, so it is reported rather than written.
+	from blendiff.merge_engine.property_appliers import can_apply, unsupported_reason
+
+	check_eq(can_apply("data.taper_object"), False, "taper object is not applicable")
+	check_eq("another datablock" in unsupported_reason("data.taper_object"), True,
+	         "and says why")
+
+
+# Snapshot on save
+
+@test
+def test_the_save_handler_is_registered_and_off_by_default():
+	from blendiff.ui import autosave
+
+	autosave.register()
+	try:
+		check_eq(autosave.snapshot_after_save in bpy.app.handlers.save_post,
+		         True, "handler installed")
+		# No preferences in a --factory-startup background run, which is also
+		# the safe default: no preferences means no automatic snapshots.
+		check_eq(autosave._preferences(), None, "preferences unreachable here")
+	finally:
+		autosave.unregister()
+		check_eq(autosave.snapshot_after_save in bpy.app.handlers.save_post,
+		         False, "handler removed again")
+
+
+@test
+def test_automatic_snapshots_prune_and_manual_ones_do_not():
+	import tempfile
+	from blendiff.storage.sidecar import SidecarManager
+
+	folder = tempfile.mkdtemp(prefix="blendiff-auto-")
+	reset_scene()
+	bpy.ops.mesh.primitive_cube_add()
+	path = os.path.join(folder, "scene.blend")
+	bpy.ops.wm.save_as_mainfile(filepath=path)
+
+	manager = SidecarManager(path)
+	manager.save_snapshot("by hand", "Scene", {"objects": {}})
+	for index in range(5):
+		manager.save_snapshot(f"auto{index}", "Scene", {"objects": {}}, auto=True)
+
+	removed = manager.prune_auto_snapshots(keep=2)
+	check_eq(removed, 3, "three automatic snapshots pruned")
+
+	labels = sorted(s.label for s in manager.list_snapshots())
+	check_eq(labels, ["auto3", "auto4", "by hand"], "the manual one survived")
+
+
 def main() -> int:
 	passed, failed = 0, []
 
