@@ -286,6 +286,69 @@ class BLENDIFF_OT_DiffTwoSnapshots(bpy.types.Operator):
 			return {"CANCELLED"}
 
 
+class BLENDIFF_OT_RestoreSnapshot(bpy.types.Operator):
+	"""Put the scene back the way this snapshot recorded it"""
+	bl_idname = "blendiff.restore_snapshot"
+	bl_label = "Restore This Snapshot"
+	bl_description = (
+		"Write this snapshot's values back over the current scene. "
+		"Objects are not created or deleted"
+	)
+
+	snapshot_id: bpy.props.StringProperty()
+
+	def invoke(self, context, event):
+		# This overwrites the scene, so it asks first.
+		return context.window_manager.invoke_confirm(self, event)
+
+	def execute(self, context):
+		from ..merge_engine.applier import Applier
+		from ..merge_engine.restore import build_restore, unrestorable_objects
+
+		mgr = _get_sidecar(context)
+		snap = mgr.get_snapshot(self.snapshot_id) if self.snapshot_id else None
+		if snap is None:
+			self.report({"ERROR"}, "BlenDiff: Snapshot not found.")
+			return {"CANCELLED"}
+
+		try:
+			current_dict, _ = _extract_current_scene(context)
+
+			# Current scene first, snapshot second, so every change's
+			# new_value is the value the snapshot holds.
+			scene_diff = DiffEngine().compare(current_dict, snap.data)
+
+			three_way = build_restore(scene_diff, snap.label)
+			result = Applier().apply_all(three_way, context)
+
+			# A restore is one step to undo, not one per property.
+			bpy.ops.ed.undo_push(message=f"BlenDiff: restore '{snap.label}'")
+
+			level = "WARNING" if (result.failed or result.skipped) else "INFO"
+			self.report({level}, f"BlenDiff [{snap.label}]: {result.report_line()}")
+
+			stranded = unrestorable_objects(scene_diff)
+			if stranded["missing"]:
+				self.report({"WARNING"}, (
+					f"BlenDiff: {len(stranded['missing'])} object(s) in the snapshot "
+					f"no longer exist and cannot be rebuilt: "
+					f"{', '.join(stranded['missing'][:5])}"
+				))
+			if stranded["extra"]:
+				self.report({"WARNING"}, (
+					f"BlenDiff: {len(stranded['extra'])} object(s) made since the "
+					f"snapshot were left alone: {', '.join(stranded['extra'][:5])}"
+				))
+
+			for outcome in result.failed[:5]:
+				self.report({"ERROR"}, f"BlenDiff: {outcome}")
+
+			return {"FINISHED"}
+		except Exception as e:
+			self.report({"ERROR"}, f"BlenDiff: {e}")
+			return {"CANCELLED"}
+
+
 class BLENDIFF_OT_DeleteSnapshot(bpy.types.Operator):
 	"""Delete a snapshot from the sidecar"""
 	bl_idname = "blendiff.delete_snapshot"
@@ -661,6 +724,7 @@ OPERATORS = [
 	BLENDIFF_OT_SaveSnapshot,
 	BLENDIFF_OT_DiffAgainstSnapshot,
 	BLENDIFF_OT_DiffTwoSnapshots,
+	BLENDIFF_OT_RestoreSnapshot,
 	BLENDIFF_OT_DeleteSnapshot,
 	BLENDIFF_OT_ExportHTML,
 	BLENDIFF_OT_RunThreeWayDiff,

@@ -134,20 +134,31 @@ def _apply_name(obj: Any, path: str, value: Any, context: Any) -> None:
 	"""
 	Rename the object.
 
-	Blender enforces unique object names, so a colliding rename would silently
-	become "Name.001" and quietly diverge from what the merge promised. Better
-	to fail loudly and let the user resolve it.
+	A colliding rename silently becomes "Name.001" in Blender, quietly
+	diverging from what the merge promised, so a real collision is refused
+	rather than allowed to happen.
+
+	Names are unique per library, not per file. A local object and an object
+	linked from an asset .blend may both be called "zapBook", so only
+	datablocks from the same library as this one can collide with it. Checking
+	the whole of `bpy.data.objects` refused perfectly legal renames in any
+	file with linked assets, which is most production files: restoring a
+	renamed object in the Blender Institute's classroom scene failed on its
+	own original name.
 	"""
 	import bpy
 
 	if not isinstance(value, str) or not value:
 		raise ValueError(f"Invalid object name: {value!r}")
 
-	existing = bpy.data.objects.get(value)
-	if existing is not None and existing is not obj:
-		raise ValueError(
-			f"Cannot rename to {value!r}: an object with that name already exists."
-		)
+	for other in bpy.data.objects:
+		if other is obj or other.name != value:
+			continue
+		if other.library is obj.library:
+			raise ValueError(
+				f"Cannot rename to {value!r}: an object with that name already "
+				f"exists in the same library."
+			)
 	obj.name = value
 
 

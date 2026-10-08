@@ -1085,3 +1085,45 @@ class TestShapeKeySettings:
 		reasons = " ".join(o.detail for o in result.skipped)
 		assert "sculpt it by hand" in reasons
 		assert "cannot add or remove shape keys" in reasons
+
+
+class TestRenameCollidesPerLibrary:
+	"""
+	Object names are unique per library, not per file.
+
+	A local object and an object linked from an asset .blend may both be
+	called "zapBook", so only datablocks from the same library can collide.
+	Checking all of bpy.data.objects refused perfectly legal renames in any
+	file with linked assets: restoring a renamed object in the Blender
+	Institute's classroom scene failed on its own original name, because the
+	asset library it came from still held one with that name.
+	"""
+
+	def test_a_real_collision_is_still_refused(self, cube, bpy):
+		bpy.data.objects.add(FakeObject("Taken"))
+		result = _apply(_proposal("Cube", [("name", "Taken")]))
+		assert not result.applied
+		assert "already exists" in result.failed[0].detail
+		assert cube.name == "Cube"
+
+	def test_a_linked_namesake_does_not_block_the_rename(self, cube, bpy):
+		linked = FakeObject("zapBook")
+		linked.library = FakeStruct(filepath="//assets/books/books.blend")
+		bpy.data.objects.add(linked, in_scene=False)
+
+		result = _apply(_proposal("Cube", [("name", "zapBook")]))
+
+		assert result.applied, result.failed
+		assert cube.name == "zapBook"
+
+	def test_two_objects_in_the_same_library_still_collide(self, cube, bpy):
+		library = FakeStruct(filepath="//assets/books/books.blend")
+		cube.library = library
+		other = FakeObject("zapBook")
+		other.library = library
+		bpy.data.objects.add(other, in_scene=False)
+
+		result = _apply(_proposal("Cube", [("name", "zapBook")]))
+
+		assert not result.applied
+		assert "same library" in result.failed[0].detail

@@ -503,6 +503,64 @@ except Exception as exc:
 	traceback.print_exc()
 
 
+# Restoring a snapshot over a scene that has moved on. This needs real bpy:
+# the point is that the writes actually land on the objects.
+
+section("Restore")
+
+try:
+	wm = bpy.context.window_manager
+	scene = bpy.context.scene
+	target = [o for o in scene.objects if o.library is None][0]
+	before = (tuple(target.location), bool(target.hide_render), target.name)
+
+	bpy.ops.blendiff.save_snapshot('EXEC_DEFAULT', label="restore-point")
+	snap = SidecarManager(bpy.data.filepath).list_snapshots()[0]
+	check("restore point saved", snap.label == "restore-point", snap.label)
+
+	target.location = (target.location.x + 7, target.location.y - 3, target.location.z)
+	target.hide_render = not before[1]
+	target.name = before[2] + "_WRECKED"
+	made_since = bpy.data.objects.new("Made_After_Restore_Point", None)
+	scene.collection.objects.link(made_since)
+
+	res = bpy.ops.blendiff.restore_snapshot('EXEC_DEFAULT', snapshot_id=snap.id)
+	check("restore_snapshot runs", res == {"FINISHED"}, str(res))
+
+	restored = scene.objects.get(before[2])
+	check("renamed object is back under its own name", restored is not None, "")
+	if restored is not None:
+		check(
+			"location restored",
+			all(abs(a - b) < 1e-4 for a, b in zip(restored.location, before[0])),
+			f"{tuple(round(v, 3) for v in restored.location)} vs {tuple(round(v, 3) for v in before[0])}",
+		)
+		check("render visibility restored", restored.hide_render == before[1], "")
+
+	# An object made since the snapshot is not quietly deleted.
+	check(
+		"object made since is left alone",
+		"Made_After_Restore_Point" in scene.objects,
+		"",
+	)
+
+	# Restoring again must be a no-op, not a second round of writes.
+	res = bpy.ops.blendiff.restore_snapshot('EXEC_DEFAULT', snapshot_id=snap.id)
+	check("restoring twice is harmless", res == {"FINISHED"}, str(res))
+	again = scene.objects.get(before[2])
+	check(
+		"still matches after a second restore",
+		again is not None and all(abs(a - b) < 1e-4 for a, b in zip(again.location, before[0])),
+		"",
+	)
+
+	bpy.data.objects.remove(made_since, do_unlink=True)
+except Exception as exc:
+	check("restore", False, f"{type(exc).__name__}: {exc}")
+	import traceback
+	traceback.print_exc()
+
+
 # 2. CLI over the sidecar this session produced
 
 section("CLI")

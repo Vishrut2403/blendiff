@@ -3,6 +3,17 @@
 ## Unreleased
 
 ### Fixed
+- **Renaming an object failed in any file with linked assets.** The collision
+  check looked through all of `bpy.data.objects`, on the belief that Blender
+  enforces unique object names across a file. It does not: names are unique
+  per library, so a local object and one linked from an asset .blend may both
+  be called "zapBook". Perfectly legal renames were refused as collisions.
+
+  It took restoring a snapshot in the Blender Institute's classroom scene to
+  show it, where an object could not be renamed back to its own original name
+  because the asset library it came from still held one by that name. Only
+  datablocks from the same library are considered now.
+
 - **A modifier parameter only one snapshot recorded is no longer a change.**
   Parameters were compared across the union of both sides, so a key present in
   one and absent in the other came out as null changing to a value. Adding
@@ -36,6 +47,23 @@
   object in another scene would still silently produce "Name.001".
 
 ### Added
+- **Restore a snapshot.** BlenDiff kept history and could say what changed but
+  offered no way to go back, which is the thing people install a version
+  control tool for. Snapshot History now has a restore button beside each
+  entry, and it asks before overwriting the scene.
+
+  It is not a new way of writing to a scene. The current scene is compared
+  against the snapshot, which makes the snapshot the "after" side, and every
+  change then describes what the scene would have to become. Those go to the
+  same applier a merge uses, so a restore inherits its limits and reports them
+  in the same words. The whole restore is a single undo step.
+
+  It does not create or delete objects, and says so when either applies. An
+  object in the snapshot but not in the scene was deleted since and cannot be
+  rebuilt, because geometry is hashed rather than stored. An object in the
+  scene but not in the snapshot was made since, and quietly deleting someone's
+  work while claiming to restore is not a thing this should do.
+
 - **Shape key settings are captured, compared and merged.** Shape keys were a
   list of names, so everything that makes one do anything was invisible: its
   value, whether it is muted, its slider range, its interpolation, the vertex

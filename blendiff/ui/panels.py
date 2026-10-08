@@ -169,6 +169,13 @@ class BLENDIFF_PT_SnapshotHistory(bpy.types.Panel):
 			op.snapshot_id = snap.id
 
 			op = col.operator(
+				"blendiff.restore_snapshot",
+				text="",
+				icon="LOOP_BACK",
+			)
+			op.snapshot_id = snap.id
+
+			op = col.operator(
 				"blendiff.delete_snapshot",
 				text="",
 				icon="TRASH",

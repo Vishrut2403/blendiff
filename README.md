@@ -91,7 +91,11 @@ for the **BlenDiff** tab.
 4. Open **Snapshot History** and press play next to any snapshot to compare it
    against the current scene. To compare two saved snapshots to each other
    instead, pick them in **Compare Two Snapshots** and press Compare.
-5. **Export HTML Report** writes a single self contained page you can send to
+5. To go back, press the restore button beside a snapshot. It writes that
+   snapshot's values over the scene in one undo step, and tells you what it
+   could not account for. It never creates or deletes objects, so anything
+   made since the snapshot is left alone.
+6. **Export HTML Report** writes a single self contained page you can send to
    someone who does not have the file open.
 
 For a merge, take a snapshot of the common starting point, then one of each
