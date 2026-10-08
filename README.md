@@ -59,6 +59,8 @@ Apply Merge stays disabled until nothing is left undecided.
   management, world background, cameras and lights
 - **Collections**: which objects belong where, and whether a collection is
   hidden, excluded or set to holdout
+- **Curves, text, empties and the rest**: the settings that shape them, such
+  as a curve's bevel and extrude or a text object's contents and spacing
 
 Renames are tracked properly. Objects carry a hidden id, so renaming `Cube` to
 `Body_LOW` stays one modified object with its other changes intact.
@@ -91,6 +93,9 @@ for the **BlenDiff** tab.
 
 1. Save your `.blend` file. BlenDiff needs somewhere to put its history.
 2. Press **Save Snapshot** and give it a name, something like "before rigging".
+   If you would rather not remember, turn on **Snapshot on save** in the
+   add-on preferences and one is taken every time you save. Those are pruned
+   to a limit you set; the ones you take by hand are kept.
 3. Carry on working.
 4. Open **Snapshot History** and press play next to any snapshot to compare it
    against the current scene. To compare two saved snapshots to each other
@@ -126,6 +131,7 @@ would then discard.
 | Camera and light settings | |
 | Material slot assignment | |
 | Modifier settings and stack order | Collection visibility |
+| Curve, text, empty and lattice settings | Links to another datablock |
 | Geometry nodes inputs | Swapping a node group |
 | Shape key value, mute, slider range | A sculpted shape key |
 

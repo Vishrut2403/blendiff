@@ -3,6 +3,31 @@
 ## Unreleased
 
 ### Fixed
+- **Saving a new scene over an old name silently adopted its history.** The
+  sidecar is keyed by the .blend's path, so saving an untitled scene as a name
+  somebody had used before picked up that name's snapshots. Nothing looked
+  wrong: a populated Snapshot History that had nothing to do with what was on
+  screen, and diffing against it compared two unrelated scenes and called
+  every object added and removed.
+
+  Capture now notices and says so. Every snapshot stamps the objects it
+  captured, so a scene that has ever been part of a history carries at least
+  one of its ids; no overlap at all means the history came from somewhere
+  else. It is a warning rather than a refusal, because replacing every object
+  in a scene is a legitimate thing to do and looks identical from here.
+
+- **Deleting two snapshots in a row reported "Snapshot not found".** Each row
+  in Snapshot History carries its snapshot id baked in at draw time, and
+  deleting one never told the panel to redraw. The rows below shifted up
+  under the cursor while still carrying the old ids, so the second click sent
+  an id that had just been deleted. Waiting a moment appeared to help, which
+  made it look as though Blender needed a pause between deletes; it did not,
+  it needed the panel to be told the list had changed.
+
+  Saving and deleting a snapshot now tag the panels for redraw, and a repeat
+  of an already-deleted id is reported as such rather than as a failure,
+  since the snapshot being gone is the state that was asked for.
+
 - **A name containing a double quote broke the merge for that item.** Blender
   lets a shape key be called `say "hi"` and a bone the same. The name went
   straight into the property path, giving
@@ -69,6 +94,43 @@
   object in another scene would still silently produce "Name.001".
 
 ### Added
+- **Snapshot on save.** Every snapshot was manual, which makes a history only
+  as good as somebody's memory. A version control tool you have to remember to
+  use gets used right up until the one time it would have mattered.
+
+  Off by default, in the add-on preferences, because writing a file beside
+  somebody's .blend without being asked is not a decision an add-on should
+  make for them. Automatic snapshots are pruned to a limit you set; snapshots
+  you take by hand are never pruned, because a history that throws away the
+  point you meant to come back to is worse than no history.
+
+  An automatic snapshot does not stamp object identities. Stamping marks the
+  file modified, and doing that from a save handler would leave the file dirty
+  the instant it was saved, which looks like a bug and trains people to
+  distrust the save indicator. Objects created since the last manual snapshot
+  are matched by name until one stamps them.
+
+  The handler never raises. Blender shows nothing useful from a failing
+  handler and a traceback at save time would look like the save itself failed,
+  so a problem is logged and the save stands.
+
+- **Nine object types that had no data of their own now have it.** Only
+  meshes, armatures, cameras and lights had their type-specific data
+  captured. Curves, surfaces, text, metaballs, lattices, empties, volumes,
+  speakers and grease pencil objects had a transform, modifiers and
+  constraints recorded and nothing else, so changing a text object's contents
+  or a curve's bevel depth produced no diff at all.
+
+  Each type now records the settings that change what it looks like: a
+  curve's bevel, extrude, fill and resolution; a text object's body, size and
+  spacing; a lattice's resolution; an empty's display type and size, which
+  live on the object rather than in a datablock. All of it merges back.
+
+  Settings that point at another datablock, such as a curve's taper object or
+  a text object's font, are recorded by name and reported rather than
+  applied. A snapshot holds a name, and choosing what a curve tapers along is
+  a modelling decision rather than a setting.
+
 - **Object display and ray visibility switches are captured, compared and
   merged.** Only `hide_viewport` and `hide_render` were recorded, so every
   other way of making an object behave differently was invisible. Switching
