@@ -34,6 +34,7 @@ from typing import Any, Callable, Optional
 
 from .armature_applier import REST_BONE_PATH as _REST_BONE_EDIT
 
+from ..data_model.paths import QUOTED_NAME, unescape_name
 from ..data_model.schema import VISIBILITY_FLAGS
 
 log = logging.getLogger(__name__)
@@ -314,7 +315,9 @@ def _apply_custom_prop(obj: Any, path: str, value: Any, context: Any) -> None:
 	obj[key] = value
 
 
-_POSE_BONE = re.compile(r'^pose\.bones\["(?P<bone>[^"]+)"\]\.(?P<field>\w+)$')
+_POSE_BONE = re.compile(
+	r'^pose\.bones\["(?P<bone>' + QUOTED_NAME + r')"\]\.(?P<field>\w+)$'
+)
 
 #: Pose-bone fields that can be written back, mapped to their bpy attribute.
 POSE_BONE_ATTRS: dict[str, str] = {
@@ -339,7 +342,7 @@ def _apply_pose_bone(obj: Any, path: str, value: Any, context: Any) -> None:
 	if not match:
 		raise ValueError(f"Cannot parse pose bone path {path!r}")
 
-	bone_name = match.group("bone")
+	bone_name = unescape_name(match.group("bone"))
 	field = match.group("field")
 
 	attr = POSE_BONE_ATTRS.get(field)
@@ -372,7 +375,7 @@ REST_BONE_FLAGS: dict[str, str] = {
 }
 
 _REST_BONE_FLAG = re.compile(
-	r'^armature\.bones\["(?P<bone>[^"]+)"\]\.(?P<field>' +
+	r'^armature\.bones\["(?P<bone>' + QUOTED_NAME + r')"\]\.(?P<field>' +
 	"|".join(REST_BONE_FLAGS) + r")$"
 )
 
@@ -397,7 +400,7 @@ def _apply_rest_bone_flag(obj: Any, path: str, value: Any, context: Any) -> None
 	if obj.data is None:
 		raise ValueError(f"{obj.name!r} has no armature data.")
 
-	bone = obj.data.bones.get(match.group("bone"))
+	bone = obj.data.bones.get(unescape_name(match.group("bone")))
 	if bone is None:
 		raise ValueError(f"{obj.name!r} has no bone {match.group('bone')!r}.")
 
@@ -555,7 +558,7 @@ def _apply_visibility_flag(obj: Any, path: str, value: Any, context: Any) -> Non
 # relative base, and the write would then fail at apply time instead of being
 # skipped with a reason.
 _SHAPE_KEY_PROP = re.compile(
-	r'^mesh\.shape_keys\["([^"]+)"\]\.'
+	r'^mesh\.shape_keys\["' + QUOTED_NAME + r'"\]\.'
 	r'(value|mute|slider_min|slider_max|interpolation)$'
 )
 
@@ -586,7 +589,8 @@ def _apply_shape_key(obj: Any, path: str, value: Any, context: Any) -> None:
 	if match is None:
 		raise ValueError(f"Unsupported shape key property {path!r}")
 
-	key_name, field = match.group(1), match.group(2)
+	key_name = unescape_name(match.group(1))
+	field = match.group(2)
 	coerce = _SHAPE_KEY_WRITABLE.get(field)
 	if coerce is None:
 		raise ValueError(f"Shape key setting {field!r} cannot be written back")
@@ -771,21 +775,21 @@ UNSUPPORTED_REASONS: tuple[tuple[re.Pattern, str], ...] = (
 	 "An object's type cannot be changed after creation."),
 	(re.compile(r"^visible_in_viewlayer$"),
 	 "Derived from collection and object visibility; set those instead."),
-	(re.compile(r'^armature\.bones\["[^"]+"\]$'),
+	(re.compile(r'^armature\.bones\["' + QUOTED_NAME + r'"\]$'),
 	 "BlenDiff cannot add or remove bones; edit the rig directly."),
 	(re.compile(r"^armature\.(name|bone_count|collections)$"),
 	 "Derived from the rig itself; change it in the armature."),
-	(re.compile(r'^pose\.bones\["[^"]+"\]\.constraints'),
+	(re.compile(r'^pose\.bones\["' + QUOTED_NAME + r'"\]\.constraints'),
 	 "Bone constraints are not yet applicable; re-create the constraint manually."),
-	(re.compile(r'^pose\.bones\["[^"]+"\]$'),
+	(re.compile(r'^pose\.bones\["' + QUOTED_NAME + r'"\]$'),
 	 "BlenDiff cannot add or remove bones; edit the rig directly."),
 	(re.compile(r"^pose\.bones\.[^.]+\.custom_shape$"),
 	 "Custom shapes reference another object; assign it by hand."),
-	(re.compile(r'^mesh\.shape_keys\["[^"]+"\]\.shape$'),
+	(re.compile(r'^mesh\.shape_keys\["' + QUOTED_NAME + r'"\]\.shape$'),
 	 "A shape key's points are hashed, not stored; sculpt it by hand."),
-	(re.compile(r'^mesh\.shape_keys\["[^"]+"\]\.(relative_key|vertex_group)$'),
+	(re.compile(r'^mesh\.shape_keys\["' + QUOTED_NAME + r'"\]\.(relative_key|vertex_group)$'),
 	 "This shape key setting references other data; set it by hand."),
-	(re.compile(r'^mesh\.shape_keys\["[^"]+"\]$'),
+	(re.compile(r'^mesh\.shape_keys\["' + QUOTED_NAME + r'"\]$'),
 	 "BlenDiff cannot add or remove shape keys; change them on the mesh."),
 	(re.compile(r"^mesh\."),
 	 "Mesh geometry is summarised, not stored — BlenDiff cannot rebuild it."),

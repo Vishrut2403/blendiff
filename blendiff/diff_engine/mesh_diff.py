@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from ..data_model.paths import escape_name
 from ..data_model.diff import PropertyChange
 from ..extractor.geometry_hash import comparable as _hashes_comparable
 
@@ -70,7 +71,7 @@ def _diff_shape_keys(
 	by_name_b = {k.get("name"): k for k in list_b or []}
 
 	for name in sorted(set(by_name_a) | set(by_name_b)):
-		path = f'{prefix}.shape_keys["{name}"]'
+		path = f'{prefix}.shape_keys["{escape_name(name)}"]'
 		key_a = by_name_a.get(name)
 		key_b = by_name_b.get(name)
 

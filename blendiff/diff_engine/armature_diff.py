@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..data_model.paths import escape_name
 from ..data_model.diff import PropertyChange
 from .constraint_diff import diff_constraint_stack
 
@@ -122,13 +123,13 @@ def _compare_name_keyed(
 	changes: list[PropertyChange] = []
 
 	for name in sorted(set(map_b) - set(map_a)):
-		changes.append(PropertyChange(f'{prefix}["{name}"]', None, name))
+		changes.append(PropertyChange(f'{prefix}["{escape_name(name)}"]', None, name))
 
 	for name in sorted(set(map_a) - set(map_b)):
-		changes.append(PropertyChange(f'{prefix}["{name}"]', name, None))
+		changes.append(PropertyChange(f'{prefix}["{escape_name(name)}"]', name, None))
 
 	for name in sorted(set(map_a) & set(map_b)):
-		changes.extend(compare_entry(map_a[name], map_b[name], f'{prefix}["{name}"]'))
+		changes.extend(compare_entry(map_a[name], map_b[name], f'{prefix}["{escape_name(name)}"]'))
 
 	return changes
 

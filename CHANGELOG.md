@@ -3,6 +3,28 @@
 ## Unreleased
 
 ### Fixed
+- **A name containing a double quote broke the merge for that item.** Blender
+  lets a shape key be called `say "hi"` and a bone the same. The name went
+  straight into the property path, giving
+  `mesh.shape_keys["say "hi""].value`, which the applier's pattern read as the
+  key `say ` and could not find. It failed safe, nothing wrong was written,
+  but the change was reported as unapplicable with the generic reason, so an
+  ordinary name quietly switched off part of the merge.
+
+  Names in paths are now escaped the way `bpy.utils.escape_identifier` does
+  it, a backslash before any backslash or double quote, and unescaped when
+  read back. This covers shape keys, pose bones and rest bones, which all
+  shared the pattern. The escaping is reimplemented rather than imported
+  because the diff engine is pure Python and must not reach for bpy.
+
+- **A sidecar holding valid JSON of the wrong shape took the panel down.**
+  Truncated and unparseable files were already handled, but a file where
+  `snapshots` was a string rather than a list raised TypeError out of
+  `list_snapshots()`, which the panel calls on every redraw. A sidecar is a
+  plain JSON file next to the .blend: people hand-edit them, merge them in
+  git and sync them half-written. The structure is checked on load now, and
+  individual unreadable entries are skipped rather than losing the file.
+
 - **Renaming an object failed in any file with linked assets.** The collision
   check looked through all of `bpy.data.objects`, on the belief that Blender
   enforces unique object names across a file. It does not: names are unique

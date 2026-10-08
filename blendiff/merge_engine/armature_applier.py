@@ -40,6 +40,8 @@ import logging
 import re
 from typing import Any, Optional
 
+from ..data_model.paths import QUOTED_NAME, unescape_name
+
 log = logging.getLogger(__name__)
 
 #: Rest-bone fields that can only be written in edit mode, mapped to the
@@ -58,7 +60,7 @@ EDIT_BONE_FIELDS: dict[str, str] = {
 _FIELD_ORDER = ("parent", "head_local", "tail_local", "roll", "use_connect")
 
 REST_BONE_PATH = re.compile(
-	r'^armature\.bones\["(?P<bone>[^"]+)"\]\.(?P<field>' +
+	r'^armature\.bones\["(?P<bone>' + QUOTED_NAME + r')"\]\.(?P<field>' +
 	"|".join(EDIT_BONE_FIELDS) + r")$"
 )
 
@@ -68,7 +70,7 @@ def parse_rest_bone_path(property_path: str) -> Optional[tuple[str, str]]:
 	match = REST_BONE_PATH.match(property_path)
 	if match is None:
 		return None
-	return match.group("bone"), match.group("field")
+	return unescape_name(match.group("bone")), match.group("field")
 
 
 def is_rest_bone_edit(property_path: str) -> bool:

@@ -299,13 +299,51 @@ class SidecarManager:
 						blend_filename = os.path.basename(self._blend_filepath)
 						return _empty_sidecar(blend_filename)
 
+				blend_filename = os.path.basename(self._blend_filepath)
 				try:
 						with open(self._sidecar_path, "r", encoding="utf-8") as f:
-								return json.load(f)
+								data = json.load(f)
 				except (json.JSONDecodeError, OSError) as e:
-						print(f"[BlenDiff] Warning: could not read sidecar: {e}")
-						blend_filename = os.path.basename(self._blend_filepath)
+						log.warning("Could not read sidecar: %s", e)
 						return _empty_sidecar(blend_filename)
+
+				# Valid JSON of the wrong shape was not caught here, and the
+				# TypeError it caused came out of list_snapshots(), which the
+				# panel calls on every redraw. A sidecar is a plain JSON file
+				# sitting next to the .blend: people hand-edit them, merge them
+				# in git and sync them half-written, so a wrong shape is a thing
+				# that happens rather than a thing that cannot.
+				if not isinstance(data, dict):
+						log.warning(
+								"Sidecar is a %s, not an object; ignoring it.",
+								type(data).__name__,
+						)
+						return _empty_sidecar(blend_filename)
+
+				snapshots = data.get("snapshots")
+				if snapshots is not None and not isinstance(snapshots, list):
+						log.warning("Sidecar 'snapshots' is a %s, not a list; ignoring it.",
+									type(snapshots).__name__)
+						return _empty_sidecar(blend_filename)
+
+				# Entries that are not objects would fail on their first key
+				# lookup. Dropping them keeps the readable snapshots readable.
+				if snapshots:
+						usable = [s for s in snapshots if isinstance(s, dict) and "id" in s]
+						if len(usable) != len(snapshots):
+								log.warning(
+										"Sidecar has %d unreadable snapshot entr(ies); skipping them.",
+										len(snapshots) - len(usable),
+								)
+								data = dict(data, snapshots=usable)
+
+				pool = data.get("objects")
+				if pool is not None and not isinstance(pool, dict):
+						log.warning("Sidecar object pool is a %s, not an object; ignoring it.",
+									type(pool).__name__)
+						data = dict(data, objects={})
+
+				return data
 
 		def _write_raw(self, data: dict) -> None:
 				"""

@@ -611,3 +611,55 @@ class TestSidecarsWrittenBeforeGitHashWasRemoved:
 		with open(mgr.sidecar_path, encoding="utf-8") as handle:
 			raw = json.load(handle)
 		assert "git_hash" not in raw["snapshots"][0]
+
+
+class TestSidecarsThatAreNotTheRightShape:
+	"""
+	A sidecar is a plain JSON file sitting next to the .blend.
+
+	People hand-edit them, version them in git and sync them half-written, so
+	a file that parses as JSON but is not the shape BlenDiff expects is a
+	thing that happens. Truncated and unparseable files were already handled;
+	valid JSON of the wrong shape was not, and the TypeError came out of
+	list_snapshots(), which the panel calls on every redraw.
+	"""
+
+	def _sidecar(self, tmp_path, content):
+		blend = tmp_path / "scene.blend"
+		blend.write_text("")
+		(tmp_path / "scene.blendiff").write_text(content)
+		return SidecarManager(str(blend))
+
+	def test_snapshots_as_a_string_is_ignored(self, tmp_path):
+		mgr = self._sidecar(tmp_path, '{"snapshots": "not a list"}')
+		assert mgr.list_snapshots() == []
+
+	def test_a_bare_list_is_ignored(self, tmp_path):
+		mgr = self._sidecar(tmp_path, '["not", "an", "object"]')
+		assert mgr.list_snapshots() == []
+
+	def test_a_bare_string_is_ignored(self, tmp_path):
+		mgr = self._sidecar(tmp_path, '"just a string"')
+		assert mgr.list_snapshots() == []
+
+	def test_unreadable_entries_are_skipped_and_the_rest_kept(self, tmp_path):
+		blend = tmp_path / "scene.blend"
+		blend.write_text("")
+		mgr = SidecarManager(str(blend))
+		mgr.save_snapshot("good", "Scene", {"objects": {}})
+
+		raw = json.load(open(mgr.sidecar_path))
+		raw["snapshots"].append("a string where a snapshot should be")
+		raw["snapshots"].append({"no": "id"})
+		json.dump(raw, open(mgr.sidecar_path, "w"))
+
+		snapshots = SidecarManager(str(blend)).list_snapshots()
+		assert [s.label for s in snapshots] == ["good"]
+
+	def test_an_object_pool_of_the_wrong_type_is_ignored(self, tmp_path):
+		mgr = self._sidecar(tmp_path, '{"snapshots": [], "objects": "nope"}')
+		assert mgr.list_snapshots() == []
+
+	def test_get_snapshot_survives_the_same_file(self, tmp_path):
+		mgr = self._sidecar(tmp_path, '{"snapshots": "not a list"}')
+		assert mgr.get_snapshot("any-id") is None
