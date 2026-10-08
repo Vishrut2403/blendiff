@@ -2,7 +2,11 @@ import json
 import bpy
 
 from ..storage.sidecar import SidecarManager
-from .registration import register_classes, unregister_classes
+from .registration import (
+	delete_properties,
+	register_classes,
+	unregister_classes,
+)
 
 
 # Helpers
@@ -19,6 +23,69 @@ def _get_diff_result(context) -> dict | None:
 		return json.loads(raw)
 	except (json.JSONDecodeError, TypeError):
 		return None
+
+
+def snapshot_items(self, context):
+	"""
+	Snapshot labels for every picker that offers them, newest first.
+
+	These were plain text fields, so a typo or a half-remembered label gave
+	"Snapshots not found" and the user had to go and read the history panel to
+	find the exact spelling. The labels are already on disk; offering them is
+	what the field should always have done.
+
+	Blender keeps no reference to the strings an EnumProperty callback
+	returns, so building them fresh each redraw is how a dynamic enum leaks or
+	crashes. They are held in a module-level list for as long as the enum
+	is in use.
+	"""
+	global _ENUM_ITEMS
+
+	if not bpy.data.filepath:
+		_ENUM_ITEMS = [("", "Save your .blend first", "")]
+		return _ENUM_ITEMS
+
+	try:
+		snapshots = _get_sidecar(context).list_snapshots()
+	except Exception:
+		snapshots = []
+
+	if not snapshots:
+		_ENUM_ITEMS = [("", "No snapshots saved yet", "")]
+		return _ENUM_ITEMS
+
+	# list_snapshots is already newest first, matching the order the
+	# Snapshot History panel draws them in.
+	_ENUM_ITEMS = [
+		(snap.label, snap.label, snap.timestamp_display())
+		for snap in snapshots
+	]
+	return _ENUM_ITEMS
+
+
+#: Keeps the strings handed to Blender alive. See _snapshot_items.
+_ENUM_ITEMS: list = []
+
+
+def register_wm_props():
+	bpy.types.WindowManager.blendiff_compare_from = bpy.props.EnumProperty(
+		name="From",
+		description="The earlier snapshot, treated as the before state",
+		items=snapshot_items,
+	)
+	bpy.types.WindowManager.blendiff_compare_to = bpy.props.EnumProperty(
+		name="To",
+		description="The later snapshot, treated as the after state",
+		items=snapshot_items,
+	)
+
+
+#: WindowManager properties this panel owns.
+_WM_PROPS = ("blendiff_compare_from", "blendiff_compare_to")
+
+
+def unregister_wm_props():
+	delete_properties(bpy.types.WindowManager, _WM_PROPS)
 
 
 # Main panel (legacy in-memory workflow)
@@ -108,6 +175,20 @@ class BLENDIFF_PT_SnapshotHistory(bpy.types.Panel):
 			)
 			op.snapshot_id = snap.id
 
+		# Comparing two snapshots to each other, rather than one against the
+		# current scene. The CLI could always do this; the panel could not, so
+		# "what changed between Monday and Wednesday" meant a terminal.
+		if len(snapshots) < 2:
+			return
+
+		layout.separator()
+		box = layout.box()
+		box.label(text="Compare Two Snapshots", icon="ARROW_LEFTRIGHT")
+		col = box.column(align=True)
+		col.prop(wm, "blendiff_compare_from")
+		col.prop(wm, "blendiff_compare_to")
+		box.operator("blendiff.diff_two_snapshots", icon="PLAY")
+
 
 # Results sub-panel
 
@@ -133,9 +214,15 @@ class BLENDIFF_PT_Results(bpy.types.Panel):
 			layout.label(text="No diff result available.", icon="INFO")
 			return
 
-		active_label = wm.get("blendiff_active_snapshot_label")
-		if active_label:
-			layout.label(text=f"vs. '{active_label}'", icon="BOOKMARKS")
+		# What this diff actually compared. A result can now come from two
+		# snapshots as easily as from one against the scene, so the heading
+		# says which rather than always claiming the current scene.
+		title = wm.get("blendiff_result_title")
+		if not title:
+			active_label = wm.get("blendiff_active_snapshot_label")
+			title = f"{active_label} vs. the current scene" if active_label else ""
+		if title:
+			layout.label(text=title, icon="BOOKMARKS")
 
 		layout.operator("blendiff.export_html", icon="EXPORT")
 		layout.label(text=diff.get("summary", ""), icon="INFO")
@@ -390,9 +477,11 @@ PANELS = [
 
 
 def register():
+	register_wm_props()
 	register_classes(PANELS)
 
 
 def unregister():
 	# Best-effort: one class that is already gone must not strand the rest.
 	unregister_classes(PANELS)
+	unregister_wm_props()

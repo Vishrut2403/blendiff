@@ -65,22 +65,31 @@ def _get_sidecar(context) -> SidecarManager:
 	return SidecarManager(bpy.data.filepath)
 
 
-def _run_diff_against_dict(context, snapshot_dict: dict) -> dict:
+def _store_diff(context, before: dict, after: dict, title: str) -> dict:
 	"""
-	Diff a stored snapshot against the live scene and cache the result.
+	Compare two scene dicts and cache the result for the panel to draw.
 
 	The dict is built by the shared converter, so the panel, the HTML report
-	and the CLI all describe the same diff. Extraction here never stamps
-	identities: running a diff must not modify the .blend.
+	and the CLI all describe the same diff.
 	"""
-	current_dict, _ = _extract_current_scene(context)
-
-	engine = DiffEngine()
-	diff = engine.compare(snapshot_dict, current_dict)
+	diff = DiffEngine().compare(before, after)
 	result = diff_to_dict(diff)
 
-	context.window_manager["blendiff_result"] = json.dumps(result)
+	wm = context.window_manager
+	wm["blendiff_result"] = json.dumps(result)
+	wm["blendiff_result_title"] = title
 	return result
+
+
+def _run_diff_against_dict(context, snapshot_dict: dict, title: str = "") -> dict:
+	"""
+	Diff a stored snapshot against the live scene.
+
+	Extraction here never stamps identities: running a diff must not modify
+	the .blend.
+	"""
+	current_dict, _ = _extract_current_scene(context)
+	return _store_diff(context, snapshot_dict, current_dict, title)
 
 
 # Existing operators (preserved exactly)
@@ -116,7 +125,9 @@ class BLENDIFF_OT_RunDiff(bpy.types.Operator):
 
 		try:
 			snapshot_dict = json.loads(wm["blendiff_snapshot_a"])
-			result = _run_diff_against_dict(context, snapshot_dict)
+			result = _run_diff_against_dict(
+				context, snapshot_dict, "Snapshot A vs. the current scene",
+			)
 			self.report({"INFO"}, f"BlenDiff: {result['summary']}")
 			return {"FINISHED"}
 		except Exception as e:
@@ -132,7 +143,7 @@ class BLENDIFF_OT_ClearResults(bpy.types.Operator):
 
 	def execute(self, context):
 		wm = context.window_manager
-		for key in ("blendiff_snapshot_a", "blendiff_result"):
+		for key in ("blendiff_snapshot_a", "blendiff_result", "blendiff_result_title"):
 			if key in wm:
 				del wm[key]
 		self.report({"INFO"}, "BlenDiff: Cleared.")
@@ -219,8 +230,56 @@ class BLENDIFF_OT_DiffAgainstSnapshot(bpy.types.Operator):
 			context.window_manager["blendiff_active_snapshot_label"] = snap.label
 			context.window_manager["blendiff_active_snapshot_id"] = snap.id
 
-			result = _run_diff_against_dict(context, snap.data)
+			result = _run_diff_against_dict(
+				context, snap.data, f"{snap.label} vs. the current scene",
+			)
 			self.report({"INFO"}, f"BlenDiff [{snap.label}]: {result['summary']}")
+			return {"FINISHED"}
+		except Exception as e:
+			self.report({"ERROR"}, f"BlenDiff: {e}")
+			return {"CANCELLED"}
+
+
+class BLENDIFF_OT_DiffTwoSnapshots(bpy.types.Operator):
+	"""Compare two saved snapshots against each other"""
+	bl_idname = "blendiff.diff_two_snapshots"
+	bl_label = "Compare Snapshots"
+	bl_description = (
+		"Compare two saved snapshots, without involving the current scene"
+	)
+
+	def execute(self, context):
+		wm = context.window_manager
+		before_label = wm.blendiff_compare_from.strip()
+		after_label = wm.blendiff_compare_to.strip()
+
+		if not before_label or not after_label:
+			self.report({"ERROR"}, "BlenDiff: Pick two snapshots to compare.")
+			return {"CANCELLED"}
+		if before_label == after_label:
+			self.report({"ERROR"}, "BlenDiff: Pick two different snapshots.")
+			return {"CANCELLED"}
+
+		mgr = _get_sidecar(context)
+		by_label = {snap.label: snap for snap in mgr.list_snapshots()}
+		missing = [l for l in (before_label, after_label) if l not in by_label]
+		if missing:
+			self.report({"ERROR"}, f"BlenDiff: Snapshots not found: {', '.join(missing)}")
+			return {"CANCELLED"}
+
+		try:
+			title = f"{before_label} to {after_label}"
+			result = _store_diff(
+				context,
+				by_label[before_label].data,
+				by_label[after_label].data,
+				title,
+			)
+			# The per-snapshot highlight in the history list means "compared
+			# against the scene", which this is not, so it is cleared.
+			wm["blendiff_active_snapshot_id"] = ""
+			wm["blendiff_active_snapshot_label"] = title
+			self.report({"INFO"}, f"BlenDiff [{title}]: {result['summary']}")
 			return {"FINISHED"}
 		except Exception as e:
 			self.report({"ERROR"}, f"BlenDiff: {e}")
@@ -250,7 +309,7 @@ class BLENDIFF_OT_DeleteSnapshot(bpy.types.Operator):
 			wm = context.window_manager
 			if wm.get("blendiff_active_snapshot_id") == self.snapshot_id:
 				for key in ("blendiff_active_snapshot_id", "blendiff_active_snapshot_label",
-							"blendiff_result"):
+							"blendiff_result", "blendiff_result_title"):
 					if key in wm:
 						del wm[key]
 			self.report({"INFO"}, "BlenDiff: Snapshot deleted.")
@@ -601,6 +660,7 @@ OPERATORS = [
 	BLENDIFF_OT_ClearResults,
 	BLENDIFF_OT_SaveSnapshot,
 	BLENDIFF_OT_DiffAgainstSnapshot,
+	BLENDIFF_OT_DiffTwoSnapshots,
 	BLENDIFF_OT_DeleteSnapshot,
 	BLENDIFF_OT_ExportHTML,
 	BLENDIFF_OT_RunThreeWayDiff,

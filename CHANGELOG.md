@@ -105,6 +105,16 @@
   index into the reordered stack.
 
 ### Changed
+- **The panel can compare two snapshots to each other.** It could only ever
+  compare a snapshot against the current scene, so answering "what changed
+  between Monday and Wednesday" meant dropping to the command line, which
+  could always do it. Snapshot History now offers two pickers and a Compare
+  button, and the current scene is not involved.
+
+  The Diff Results heading says what was compared rather than always claiming
+  the current scene, and the highlight in the history list, which means
+  "compared against the scene", is cleared when it no longer applies.
+
 - **The three snapshot fields in the merge panel are dropdowns.** They were
   free text, so a typo or a half-remembered label gave "Snapshots not found"
   and the only way to recover was to read the exact spelling off the history

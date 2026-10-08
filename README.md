@@ -89,7 +89,8 @@ for the **BlenDiff** tab.
 2. Press **Save Snapshot** and give it a name, something like "before rigging".
 3. Carry on working.
 4. Open **Snapshot History** and press play next to any snapshot to compare it
-   against the current scene.
+   against the current scene. To compare two saved snapshots to each other
+   instead, pick them in **Compare Two Snapshots** and press Compare.
 5. **Export HTML Report** writes a single self contained page you can send to
    someone who does not have the file open.
 

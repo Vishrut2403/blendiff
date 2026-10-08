@@ -452,6 +452,57 @@ except Exception as exc:
 	check("merge panel content", False, str(exc))
 
 
+# Comparing two snapshots to each other, which the CLI could always do and the
+# panel could not. The live scene is deliberately moved somewhere neither
+# snapshot describes, so a result that mentions it would mean the current
+# scene leaked into a comparison that should not involve it.
+
+section("Compare two snapshots")
+
+try:
+	wm = bpy.context.window_manager
+	labels = [snap.label for snap in SidecarManager(bpy.data.filepath).list_snapshots()]
+	check("at least two snapshots to compare", len(labels) >= 2, str(labels))
+
+	earlier, later = labels[-1], labels[0]
+	wm.blendiff_compare_from = earlier
+	wm.blendiff_compare_to = later
+	res = bpy.ops.blendiff.diff_two_snapshots('EXEC_DEFAULT')
+	check("diff_two_snapshots runs", res == {"FINISHED"}, str(res))
+
+	check(
+		"result says what was compared",
+		wm.get("blendiff_result_title") == f"{earlier} to {later}",
+		repr(wm.get("blendiff_result_title")),
+	)
+	check(
+		"per-snapshot highlight cleared",
+		wm.get("blendiff_active_snapshot_id") == "",
+		repr(wm.get("blendiff_active_snapshot_id")),
+	)
+
+	calls = draw_panel(bpy.types.BLENDIFF_PT_Results, ctx)
+	text = " ".join(str(c) for c in calls)
+	check("results panel names both snapshots", earlier in text and later in text, "")
+
+	calls = draw_panel(bpy.types.BLENDIFF_PT_SnapshotHistory, ctx)
+	ops = [c[1] for c in calls if isinstance(c, tuple) and c[0] == "operator"]
+	check("history panel offers the compare button",
+	      "blendiff.diff_two_snapshots" in ops, str(set(ops)))
+
+	# Two of the same snapshot is a user mistake, not a diff of nothing.
+	wm.blendiff_compare_to = earlier
+	try:
+		bpy.ops.blendiff.diff_two_snapshots('EXEC_DEFAULT')
+		check("identical snapshots refused", False, "it was accepted")
+	except RuntimeError as exc:
+		check("identical snapshots refused", "different" in str(exc), str(exc)[:60])
+except Exception as exc:
+	check("compare two snapshots", False, f"{type(exc).__name__}: {exc}")
+	import traceback
+	traceback.print_exc()
+
+
 # 2. CLI over the sidecar this session produced
 
 section("CLI")
