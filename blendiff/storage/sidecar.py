@@ -32,12 +32,20 @@ class Snapshot:
 		timestamp: str
 		scene_name: str
 		data: dict
+		#: True when a save handler took this, rather than the user.
+		#
+		# Automatic snapshots are the ones pruning is allowed to remove. A
+		# snapshot somebody chose to take and name is theirs to delete.
+		# Absent in sidecars written before snapshot-on-save existed, which
+		# reads as False: everything older was taken by hand.
+		auto: bool = False
 
 		@staticmethod
 		def create(
 				label: str,
 				scene_name: str,
 				data: dict,
+				auto: bool = False,
 		) -> "Snapshot":
 				return Snapshot(
 						id=str(uuid.uuid4()),
@@ -45,6 +53,7 @@ class Snapshot:
 						timestamp=datetime.now(timezone.utc).isoformat(),
 						scene_name=scene_name,
 						data=data,
+						auto=auto,
 				)
 
 		def to_dict(self) -> dict:
@@ -79,6 +88,7 @@ class Snapshot:
 						timestamp=d["timestamp"],
 						scene_name=d["scene_name"],
 						data=data,
+						auto=bool(d.get("auto", False)),
 				)
 
 		@property
@@ -152,6 +162,7 @@ class SidecarManager:
 				label: str,
 				scene_name: str,
 				serialized_scene: dict,
+				auto: bool = False,
 		) -> Snapshot:
 
 				self._require_available()
@@ -160,6 +171,7 @@ class SidecarManager:
 						label=label,
 						scene_name=scene_name,
 						data=serialized_scene,
+						auto=auto,
 				)
 
 				data = self._load_raw()
@@ -167,6 +179,35 @@ class SidecarManager:
 				self._write_raw(data)
 
 				return snap
+
+		def prune_auto_snapshots(self, keep: int) -> int:
+				"""
+				Drop the oldest automatic snapshots, keeping the newest `keep`.
+
+				Only automatic ones. A snapshot somebody chose to take and name
+				is theirs to delete, and a history that silently throws away the
+				point you meant to come back to is worse than no history.
+
+				Returns how many were removed. `keep` of zero or less removes
+				nothing, so a misconfigured preference cannot wipe the history.
+				"""
+				self._require_available()
+				if keep <= 0:
+						return 0
+
+				data = self._load_raw()
+				entries = data.get("snapshots", [])
+
+				autos = [s for s in entries if s.get("auto")]
+				if len(autos) <= keep:
+						return 0
+
+				autos.sort(key=lambda s: s.get("timestamp", ""))
+				doomed = {s["id"] for s in autos[: len(autos) - keep]}
+
+				data["snapshots"] = [s for s in entries if s["id"] not in doomed]
+				self._write_raw(data)
+				return len(doomed)
 
 		def delete_snapshot(self, snapshot_id: str) -> bool:
 				"""

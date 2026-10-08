@@ -663,3 +663,75 @@ class TestSidecarsThatAreNotTheRightShape:
 	def test_get_snapshot_survives_the_same_file(self, tmp_path):
 		mgr = self._sidecar(tmp_path, '{"snapshots": "not a list"}')
 		assert mgr.get_snapshot("any-id") is None
+
+
+class TestAutomaticSnapshots:
+	"""
+	Snapshots a save handler took, and the pruning that applies only to them.
+
+	A history that silently throws away the point you meant to come back to is
+	worse than no history, so pruning never touches a snapshot somebody chose
+	to take and name.
+	"""
+
+	def _manager(self, tmp_path):
+		blend = tmp_path / "scene.blend"
+		blend.write_text("")
+		return SidecarManager(str(blend))
+
+	def test_snapshots_are_manual_unless_said_otherwise(self, tmp_path):
+		mgr = self._manager(tmp_path)
+		snap = mgr.save_snapshot("v1", "Scene", {"objects": {}})
+		assert snap.auto is False
+
+	def test_the_flag_survives_a_round_trip(self, tmp_path):
+		mgr = self._manager(tmp_path)
+		mgr.save_snapshot("auto", "Scene", {"objects": {}}, auto=True)
+		mgr.save_snapshot("by hand", "Scene", {"objects": {}})
+
+		by_label = {s.label: s for s in SidecarManager(mgr._blend_filepath).list_snapshots()}
+		assert by_label["auto"].auto is True
+		assert by_label["by hand"].auto is False
+
+	def test_snapshots_written_before_the_flag_existed_read_as_manual(self, tmp_path):
+		mgr = self._manager(tmp_path)
+		mgr.save_snapshot("old", "Scene", {"objects": {}})
+		raw = json.load(open(mgr.sidecar_path))
+		del raw["snapshots"][0]["auto"]
+		json.dump(raw, open(mgr.sidecar_path, "w"))
+
+		assert SidecarManager(mgr._blend_filepath).list_snapshots()[0].auto is False
+
+	def test_pruning_keeps_the_newest_and_drops_the_rest(self, tmp_path):
+		mgr = self._manager(tmp_path)
+		for i in range(6):
+			mgr.save_snapshot(f"auto{i}", "Scene", {"objects": {}}, auto=True)
+
+		assert mgr.prune_auto_snapshots(keep=2) == 4
+		kept = [s.label for s in mgr.list_snapshots()]
+		assert kept == ["auto5", "auto4"], kept
+
+	def test_pruning_never_touches_a_manual_snapshot(self, tmp_path):
+		mgr = self._manager(tmp_path)
+		mgr.save_snapshot("precious", "Scene", {"objects": {}})
+		for i in range(5):
+			mgr.save_snapshot(f"auto{i}", "Scene", {"objects": {}}, auto=True)
+
+		mgr.prune_auto_snapshots(keep=1)
+		labels = [s.label for s in mgr.list_snapshots()]
+		assert "precious" in labels
+		assert sorted(labels) == ["auto4", "precious"], labels
+
+	def test_pruning_does_nothing_when_under_the_cap(self, tmp_path):
+		mgr = self._manager(tmp_path)
+		mgr.save_snapshot("auto0", "Scene", {"objects": {}}, auto=True)
+		assert mgr.prune_auto_snapshots(keep=10) == 0
+
+	def test_a_nonsense_cap_cannot_wipe_the_history(self, tmp_path):
+		mgr = self._manager(tmp_path)
+		for i in range(3):
+			mgr.save_snapshot(f"auto{i}", "Scene", {"objects": {}}, auto=True)
+
+		assert mgr.prune_auto_snapshots(keep=0) == 0
+		assert mgr.prune_auto_snapshots(keep=-5) == 0
+		assert len(mgr.list_snapshots()) == 3

@@ -82,7 +82,7 @@ _UI_IMPORT_ERROR: str = ""
 
 if _IN_BLENDER:
 	try:
-		from .ui import panels, operators, merge_panel
+		from .ui import autosave, panels, operators, merge_panel
 		_UI_AVAILABLE = True
 	except ImportError as exc:  # pragma: no cover — depends on install shape
 		_UI_IMPORT_ERROR = f"{type(exc).__name__}: {exc}"
@@ -95,8 +95,10 @@ if _UI_AVAILABLE:
 		operators.register()
 		panels.register()
 		merge_panel.register()
+		autosave.register()
 
 	def unregister() -> None:
+		autosave.unregister()
 		merge_panel.unregister()
 		panels.unregister()
 		operators.unregister()
