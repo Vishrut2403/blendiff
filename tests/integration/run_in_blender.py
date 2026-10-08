@@ -1510,6 +1510,116 @@ def test_geometry_nodes_input_merges_back():
 	check_eq(mod.get(ids["Target"]), target, "object input taken from A")
 
 
+# Shape keys
+#
+# Recorded as a list of names until 0.9.0, so everything that makes a shape
+# key do anything was invisible. These need real bpy: the point data behind a
+# key is what the digest is taken from, and nothing can stand in for it.
+
+def _keyed_cube():
+	reset_scene()
+	bpy.ops.mesh.primitive_cube_add()
+	cube = bpy.context.active_object
+	cube.vertex_groups.new(name="Mask")
+	cube.shape_key_add(name="Basis")
+	smile = cube.shape_key_add(name="Smile")
+	smile.slider_max = 2.0
+	return cube, smile
+
+
+def _key_data(name="Smile"):
+	blocks = extract()["objects"]["Cube"]["mesh_data"]["shape_key_data"]
+	for block in blocks:
+		if block["name"] == name:
+			return block
+	raise AssertionError(f"no shape key {name!r} in the snapshot")
+
+
+@test
+def test_shape_key_settings_extracted():
+	cube, smile = _keyed_cube()
+	smile.value = 0.6
+	smile.mute = True
+	smile.vertex_group = "Mask"
+
+	block = _key_data()
+	check_eq(round(block["value"], 3), 0.6, "value")
+	check_eq(block["mute"], True, "mute")
+	check_eq(block["slider_max"], 2.0, "slider max")
+	check_eq(block["vertex_group"], "Mask", "vertex group")
+	check_eq(block["relative_key"], "Basis", "relative key")
+
+
+@test
+def test_shape_key_value_change_is_diffed():
+	cube, smile = _keyed_cube()
+	smile.value = 0.0
+	before = extract()
+
+	smile.value = 0.75
+	after = extract()
+
+	paths = [
+		c.property_path
+		for o in DiffEngine().compare(before, after).modified_objects
+		for c in o.changes
+	]
+	check_eq(paths, ['mesh.shape_keys["Smile"].value'], "one value change")
+
+
+@test
+def test_sculpting_a_shape_key_is_detected():
+	cube, smile = _keyed_cube()
+	before = extract()
+
+	smile.data[0].co.x += 0.5
+	after = extract()
+
+	paths = [
+		c.property_path
+		for o in DiffEngine().compare(before, after).modified_objects
+		for c in o.changes
+	]
+	check_eq(paths, ['mesh.shape_keys["Smile"].shape'], "shape reported, nothing else")
+
+
+@test
+def test_mesh_without_shape_keys_records_an_empty_list():
+	reset_scene()
+	bpy.ops.mesh.primitive_cube_add()
+	check_eq(extract()["objects"]["Cube"]["mesh_data"]["shape_key_data"], [],
+	         "no shape keys")
+
+
+@test
+def test_shape_key_value_merges_back():
+	from blendiff.data_model.conflict import Resolution
+	from blendiff.merge_engine.applier import Applier
+	from blendiff.merge_engine.merge_engine import MergeEngine
+
+	cube, smile = _keyed_cube()
+	smile.value = 0.0
+	base = extract()
+
+	smile.value = 0.6
+	version_a = extract()
+
+	smile.value = 0.0
+	version_b = extract()
+
+	three_way = MergeEngine().three_way_diff(
+		base=base, version_a=version_a, version_b=version_b,
+		base_label="base", label_a="A", label_b="B",
+	)
+	for proposal in three_way.proposals:
+		for conflict in proposal.conflicts:
+			conflict.resolution = Resolution.USE_A
+
+	result = Applier().apply_all(three_way, bpy.context)
+	check_eq(result.failed, [], "nothing failed to apply")
+	check_eq(round(smile.value, 3), 0.6, "value taken from A")
+
+
 def main() -> int:
 	passed, failed = 0, []
 

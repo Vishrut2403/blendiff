@@ -36,6 +36,27 @@
   object in another scene would still silently produce "Name.001".
 
 ### Added
+- **Shape key settings are captured, compared and merged.** Shape keys were a
+  list of names, so everything that makes one do anything was invisible: its
+  value, whether it is muted, its slider range, its interpolation, the vertex
+  group masking it, and the key it is relative to. An animator sliding a key
+  from 0 to 1, the most common thing anyone does with one, produced no diff.
+
+  Each key is now compared by name and reported per setting, as
+  `mesh.shape_keys["Smile"].value`. By name rather than by position, because
+  inserting a key shifts every one below it and pairing by index would report
+  all of them as changed.
+
+  The shape itself is hashed rather than stored, for the same reason mesh
+  geometry is: a key on a dense mesh holds a position per vertex. So a
+  sculpted key reports as changed without the sidecar carrying it.
+
+  Value, mute, slider range and interpolation can be merged. The shape cannot,
+  nor can adding or removing a key, and both now say so. A value write that
+  Blender clamps to the slider range is reported as a failure rather than
+  counted as applied, because a merge that asked for 5.0 and produced 2.0 has
+  not done what it claimed.
+
 - **Geometry Nodes inputs are captured, compared and merged.** A Geometry
   Nodes modifier was recorded as a name, a type and two visibility flags, and
   nothing else. Its inputs are the entire point of a node group, so changing

@@ -14,6 +14,21 @@ _FLOAT_VEC_PROPS = {"bbox_min", "bbox_max"}
 # List-of-string properties
 _ORDERED_LIST_PROPS = {"uv_layers", "shape_keys", "vertex_groups"}
 
+#: Shape key settings, compared per key and reported per setting.
+_SHAPE_KEY_DATA = "shape_key_data"
+
+#: Settings on one shape key, in the order they read naturally in a report.
+_SHAPE_KEY_FIELDS = (
+	"value",
+	"mute",
+	"slider_min",
+	"slider_max",
+	"interpolation",
+	"vertex_group",
+	"relative_key",
+	"points_hash",
+)
+
 # Geometry digests, mapped to the property name reported to the user.
 #
 # The raw key names say "hash", which is an implementation detail; what an
@@ -32,6 +47,60 @@ def _vecs_equal(a: list[float], b: list[float]) -> bool:
 	if len(a) != len(b):
 		return False
 	return all(abs(x - y) < _EPSILON for x, y in zip(a, b))
+
+
+
+def _diff_shape_keys(
+	list_a: list[dict] | None,
+	list_b: list[dict] | None,
+	prefix: str,
+) -> list[PropertyChange]:
+	"""
+	Compare shape keys by name, one setting at a time.
+
+	By name rather than by position, because reordering keys in the list does
+	not change what any of them does, while pairing by index after an
+	insertion would report every key below it as changed.
+
+	Keys added or removed are reported once, as the key itself, rather than as
+	a change to each of its settings.
+	"""
+	changes: list[PropertyChange] = []
+	by_name_a = {k.get("name"): k for k in list_a or []}
+	by_name_b = {k.get("name"): k for k in list_b or []}
+
+	for name in sorted(set(by_name_a) | set(by_name_b)):
+		path = f'{prefix}.shape_keys["{name}"]'
+		key_a = by_name_a.get(name)
+		key_b = by_name_b.get(name)
+
+		if key_a is None:
+			changes.append(PropertyChange(path, None, name))
+			continue
+		if key_b is None:
+			changes.append(PropertyChange(path, name, None))
+			continue
+
+		for field in _SHAPE_KEY_FIELDS:
+			# A field one side never recorded is not a change, the same rule
+			# the geometry digests follow.
+			if field not in key_a or field not in key_b:
+				continue
+			val_a, val_b = key_a[field], key_b[field]
+			if field == "points_hash":
+				if not _hashes_comparable(val_a, val_b):
+					continue
+				if val_a != val_b:
+					changes.append(PropertyChange(f"{path}.shape", val_a, val_b))
+				continue
+			if isinstance(val_a, float) or isinstance(val_b, float):
+				if abs(float(val_a) - float(val_b)) > _EPSILON:
+					changes.append(PropertyChange(f"{path}.{field}", val_a, val_b))
+				continue
+			if val_a != val_b:
+				changes.append(PropertyChange(f"{path}.{field}", val_a, val_b))
+
+	return changes
 
 
 def diff_mesh_data(
@@ -69,7 +138,14 @@ def diff_mesh_data(
 		val_b = mesh_b.get(key)
 		path = f"{prefix}.{key}"
 
-		if key in _HASH_PROPS:
+		if key == _SHAPE_KEY_DATA:
+			# Absent on one side means that snapshot predates shape key
+			# settings being captured, not that every key just appeared.
+			if key not in mesh_a or key not in mesh_b:
+				continue
+			changes.extend(_diff_shape_keys(val_a, val_b, prefix))
+
+		elif key in _HASH_PROPS:
 			# Only meaningful when both snapshots recorded it. Snapshots taken
 			# before geometry hashing existed have no digest, and comparing a
 			# digest against its absence would report an edit nobody made.
@@ -97,6 +173,12 @@ def diff_mesh_data(
 		elif key in _INT_PROPS:
 			if val_a != val_b:
 				changes.append(PropertyChange(path, val_a, val_b))
+
+		elif key == "shape_keys" and _SHAPE_KEY_DATA in mesh_a and _SHAPE_KEY_DATA in mesh_b:
+			# The name list is redundant once both sides carry the full key
+			# data: an added key would otherwise be reported twice, once as
+			# the list changing and once as the key itself.
+			continue
 
 		elif key in _ORDERED_LIST_PROPS:
 			set_a = set(val_a) if isinstance(val_a, list) else set()

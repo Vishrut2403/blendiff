@@ -49,6 +49,8 @@ Apply Merge stays disabled until nothing is left undecided.
 - **Modifiers and constraints**: the whole stack, in order, with per setting detail
 - **Geometry nodes**: the node group on a modifier and every input it exposes,
   by the name you see in the panel rather than an internal socket number
+- **Shape keys**: each key's value, mute, slider range and interpolation, plus
+  whether the shape itself was sculpted
 - **Animation**: keyframe counts, frame ranges, interpolation, drivers and NLA tracks
 - **Scene settings**: render engine, resolution, sampling, output format, colour
   management, world background, cameras and lights
@@ -116,6 +118,7 @@ would then discard.
 | Material slot assignment | |
 | Modifier settings and stack order | |
 | Geometry nodes inputs | Swapping a node group |
+| Shape key value, mute, slider range | A sculpted shape key |
 
 ---
 

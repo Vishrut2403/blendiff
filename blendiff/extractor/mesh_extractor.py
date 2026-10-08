@@ -1,6 +1,74 @@
 from __future__ import annotations
 
-from .geometry_hash import extract_geometry_hashes
+import logging
+
+from .geometry_hash import EMPTY, extract_geometry_hashes, hash_floats
+
+log = logging.getLogger(__name__)
+
+
+# Shape keys
+#
+# Shape keys were recorded as a list of names, so everything that makes a
+# shape key do anything was invisible: its value, whether it is muted, its
+# slider range, and the shape itself. An animator sliding a key from 0 to 1,
+# the single most common thing anyone does with one, produced no diff.
+#
+# Each key's point positions are hashed rather than stored, for the same
+# reason mesh geometry is: a key on a dense mesh holds a position per vertex,
+# and the sidecar is meant to stay small enough to live beside the .blend.
+
+def _shape_key_points_hash(key_block) -> str:
+	"""Digest of one shape key's point positions."""
+	points = getattr(key_block, "data", None)
+	if not points:
+		return EMPTY
+	try:
+		buffer = _float_buffer(len(points) * 3)
+		points.foreach_get("co", buffer)
+		return hash_floats(buffer)
+	except Exception as exc:
+		log.warning("Could not hash shape key %r: %s", key_block.name, exc)
+		return EMPTY
+
+
+def _float_buffer(size: int):
+	"""numpy buffer when available, matching how geometry hashing reads."""
+	try:
+		import numpy as np
+
+		return np.empty(size, dtype=np.float32)
+	except ImportError:
+		return [0.0] * size
+
+
+def extract_shape_key_data(mesh) -> list[dict]:
+	"""
+	Every shape key on a mesh, with the settings that affect the result.
+
+	Returns an empty list for a mesh with no shape keys, which is also what a
+	mesh whose keys were all removed returns, so the two are indistinguishable
+	on purpose: in both cases there is nothing to compare.
+	"""
+	keys = getattr(mesh, "shape_keys", None)
+	if keys is None:
+		return []
+
+	blocks = []
+	for block in keys.key_blocks:
+		relative = getattr(block, "relative_key", None)
+		blocks.append({
+			"name":          block.name,
+			"value":         round(float(block.value), 6),
+			"mute":          bool(block.mute),
+			"slider_min":    round(float(block.slider_min), 6),
+			"slider_max":    round(float(block.slider_max), 6),
+			"interpolation": block.interpolation,
+			"vertex_group":  block.vertex_group or None,
+			"relative_key":  relative.name if relative is not None else None,
+			"points_hash":   _shape_key_points_hash(block),
+		})
+	return blocks
 
 
 def extract_mesh_data(obj) -> dict | None:
@@ -45,10 +113,16 @@ def extract_mesh_data(obj) -> dict | None:
 		# UV layers
 		"uv_layers":      [uv.name for uv in mesh.uv_layers],
 
-		# Shape keys
+		# Shape keys. The name list stays for snapshots written before the
+		# settings below were captured, and because "which keys exist" is a
+		# different question from "what are they set to".
 		"shape_keys":     (
 			[sk.name for sk in mesh.shape_keys.key_blocks]
 			if mesh.shape_keys else []
+		),
+		"shape_key_data": extract_shape_key_data(mesh),
+		"shape_keys_relative": (
+			bool(mesh.shape_keys.use_relative) if mesh.shape_keys else None
 		),
 
 		# Vertex groups (stored on object, not mesh)

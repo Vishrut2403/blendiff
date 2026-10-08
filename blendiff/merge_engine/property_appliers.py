@@ -517,6 +517,70 @@ def _apply_modifier(obj: Any, path: str, value: Any, context: Any) -> None:
 	setattr(mod, attr, value)
 
 
+#: mesh.shape_keys["Smile"].value -> key "Smile", setting "value"
+#
+# Only the settings that are a plain write. Matching every field would make
+# can_apply() claim BlenDiff can restore a sculpted shape or rewire a key's
+# relative base, and the write would then fail at apply time instead of being
+# skipped with a reason.
+_SHAPE_KEY_PROP = re.compile(
+	r'^mesh\.shape_keys\["([^"]+)"\]\.'
+	r'(value|mute|slider_min|slider_max|interpolation)$'
+)
+
+#: Shape key settings that are a plain write. "shape" is the point positions,
+#: which are hashed rather than stored and so can never be written back.
+_SHAPE_KEY_WRITABLE = {
+	"value": float,
+	"mute": bool,
+	"slider_min": float,
+	"slider_max": float,
+	"interpolation": str,
+}
+
+
+def _apply_shape_key(obj: Any, path: str, value: Any, context: Any) -> None:
+	"""
+	Write one setting on an existing shape key.
+
+	Sliding a key is the most common thing anyone does with one and the most
+	likely thing for two people to disagree about, so it is worth merging even
+	though the shape itself cannot be.
+
+	Keys are found by name rather than index: reordering them changes nothing
+	about what they do, and pairing by position would write to the wrong key
+	after an insertion.
+	"""
+	match = _SHAPE_KEY_PROP.match(path)
+	if match is None:
+		raise ValueError(f"Unsupported shape key property {path!r}")
+
+	key_name, field = match.group(1), match.group(2)
+	coerce = _SHAPE_KEY_WRITABLE.get(field)
+	if coerce is None:
+		raise ValueError(f"Shape key setting {field!r} cannot be written back")
+
+	mesh = getattr(obj, "data", None)
+	keys = getattr(mesh, "shape_keys", None) if mesh is not None else None
+	if keys is None:
+		raise ValueError(f"{obj.name!r} has no shape keys.")
+
+	block = keys.key_blocks.get(key_name)
+	if block is None:
+		raise ValueError(f"{obj.name!r} has no shape key named {key_name!r}.")
+
+	# slider_min and slider_max bound value, and Blender clamps a write that
+	# falls outside the current range. Widening the range first is not this
+	# applier's business, so a clamped write is reported rather than hidden.
+	setattr(block, field, coerce(value))
+	written = getattr(block, field)
+	if coerce is float and abs(float(written) - float(value)) > 1e-5:
+		raise ValueError(
+			f"{key_name!r}.{field} was clamped to {written} by its slider "
+			f"range; widen the range first."
+		)
+
+
 #: Geometry Nodes input keys are flattened as "inputs.<visible socket name>".
 _NODE_INPUT_PREFIX = "inputs."
 
@@ -659,6 +723,7 @@ REGISTRY: tuple[ApplierEntry, ...] = (
 	ApplierEntry(re.compile(r"^light\.[^.]+$"), _apply_light, "Light data"),
 	ApplierEntry(_MODIFIER_PROP, _apply_modifier, "Modifier setting"),
 	ApplierEntry(re.compile(r"^modifiers\.order$"), _apply_modifier_order, "Modifier order"),
+	ApplierEntry(_SHAPE_KEY_PROP, _apply_shape_key, "Shape key setting"),
 )
 
 
@@ -680,6 +745,12 @@ UNSUPPORTED_REASONS: tuple[tuple[re.Pattern, str], ...] = (
 	 "BlenDiff cannot add or remove bones; edit the rig directly."),
 	(re.compile(r"^pose\.bones\.[^.]+\.custom_shape$"),
 	 "Custom shapes reference another object; assign it by hand."),
+	(re.compile(r'^mesh\.shape_keys\["[^"]+"\]\.shape$'),
+	 "A shape key's points are hashed, not stored; sculpt it by hand."),
+	(re.compile(r'^mesh\.shape_keys\["[^"]+"\]\.(relative_key|vertex_group)$'),
+	 "This shape key setting references other data; set it by hand."),
+	(re.compile(r'^mesh\.shape_keys\["[^"]+"\]$'),
+	 "BlenDiff cannot add or remove shape keys; change them on the mesh."),
 	(re.compile(r"^mesh\."),
 	 "Mesh geometry is summarised, not stored — BlenDiff cannot rebuild it."),
 	(re.compile(r"^modifiers\[\d+\]\.type$"),

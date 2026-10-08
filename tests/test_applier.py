@@ -21,9 +21,11 @@ import fake_bpy
 from fake_bpy import (
 	FakeCollection,
 	FakeData,
+	FakeKeyBlock,
 	FakeMaterial,
 	FakeModifier,
 	FakeNodeGroup,
+	FakeShapeKeys,
 	FakeSocket,
 	FakeObject,
 	FakeSlot,
@@ -1008,3 +1010,78 @@ class TestGeometryNodesInputs:
 		result = _apply(_proposal("Cube", [("modifiers[0].node_group", "Other")]))
 		assert not result.applied
 		assert "assign it by hand" in result.skipped[0].detail
+
+
+class TestShapeKeySettings:
+	"""
+	Shape key settings are merged; the shape itself is not.
+
+	Shape keys were recorded as a list of names, so a key's value, its mute
+	flag and its slider range were all invisible and none of them could be
+	merged. Sliding a key is the most common thing anyone does with one and
+	the most likely thing for two people to disagree about.
+
+	Keys are found by name, not index: reordering them changes nothing about
+	what they do, and pairing by position would write to the wrong key after
+	an insertion.
+	"""
+
+	@pytest.fixture
+	def keyed(self, cube):
+		cube.data = FakeData(shape_keys=FakeShapeKeys([
+			FakeKeyBlock("Basis"),
+			FakeKeyBlock("Smile", slider_max=2.0),
+		]))
+		return cube.data.shape_keys.key_blocks.get("Smile")
+
+	def test_value_is_written(self, cube, keyed):
+		result = _apply(_proposal("Cube", [('mesh.shape_keys["Smile"].value', 0.6)]))
+		assert result.applied, result.failed
+		assert keyed.value == pytest.approx(0.6)
+
+	def test_mute_is_written(self, cube, keyed):
+		_apply(_proposal("Cube", [('mesh.shape_keys["Smile"].mute', True)]))
+		assert keyed.mute is True
+
+	def test_slider_range_is_written(self, cube, keyed):
+		_apply(_proposal("Cube", [('mesh.shape_keys["Smile"].slider_max', 4.0)]))
+		assert keyed.slider_max == pytest.approx(4.0)
+
+	def test_interpolation_is_written(self, cube, keyed):
+		_apply(_proposal("Cube", [('mesh.shape_keys["Smile"].interpolation', "KEY_BSPLINE")]))
+		assert keyed.interpolation == "KEY_BSPLINE"
+
+	def test_keys_are_found_by_name_not_position(self, cube, keyed):
+		# Basis sits at index 0; writing "Smile" must not touch it.
+		basis = cube.data.shape_keys.key_blocks.get("Basis")
+		_apply(_proposal("Cube", [('mesh.shape_keys["Smile"].value', 0.5)]))
+		assert basis.value == pytest.approx(0.0)
+		assert keyed.value == pytest.approx(0.5)
+
+	def test_a_clamped_write_is_reported_not_hidden(self, cube, keyed):
+		# Blender silently clamps to the slider range, so a merge that asked
+		# for 5.0 and produced 2.0 has not done what it claimed.
+		result = _apply(_proposal("Cube", [('mesh.shape_keys["Smile"].value', 5.0)]))
+		assert not result.applied
+		assert "clamped" in result.failed[0].detail
+
+	def test_missing_key_fails_with_the_name(self, cube, keyed):
+		result = _apply(_proposal("Cube", [('mesh.shape_keys["Frown"].value', 1.0)]))
+		assert not result.applied
+		assert "no shape key named 'Frown'" in result.failed[0].detail
+
+	def test_mesh_without_shape_keys_fails_clearly(self, cube):
+		cube.data = FakeData(shape_keys=None)
+		result = _apply(_proposal("Cube", [('mesh.shape_keys["Smile"].value', 1.0)]))
+		assert not result.applied
+		assert "has no shape keys" in result.failed[0].detail
+
+	def test_the_shape_itself_is_reported_not_applied(self, cube, keyed):
+		result = _apply(_proposal("Cube", [
+			('mesh.shape_keys["Smile"].shape', "2:deadbeef"),
+			('mesh.shape_keys["Frown"]', "Frown"),
+		]))
+		assert not result.applied
+		reasons = " ".join(o.detail for o in result.skipped)
+		assert "sculpt it by hand" in reasons
+		assert "cannot add or remove shape keys" in reasons

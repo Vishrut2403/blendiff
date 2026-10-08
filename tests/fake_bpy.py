@@ -48,6 +48,47 @@ class FakeData:
 		self.__dict__.update(kwargs)
 
 
+class FakeKeyBlock:
+	"""One shape key."""
+
+	def __init__(self, name, value=0.0, mute=False, slider_min=0.0, slider_max=1.0,
+	             interpolation="KEY_LINEAR"):
+		self.name = name
+		self._value = value
+		self.mute = mute
+		self.slider_min = slider_min
+		self.slider_max = slider_max
+		self.interpolation = interpolation
+
+	# Blender clamps a value write to the slider range rather than refusing
+	# it, which the applier has to notice and report.
+	@property
+	def value(self):
+		return self._value
+
+	@value.setter
+	def value(self, new):
+		self._value = min(max(float(new), self.slider_min), self.slider_max)
+
+
+class FakeShapeKeys:
+	"""obj.data.shape_keys, whose key_blocks is looked up by name."""
+
+	def __init__(self, blocks=(), use_relative=True):
+		self.key_blocks = FakeIDMapView(blocks)
+		self.use_relative = use_relative
+
+
+class FakeIDMapView(list):
+	"""A list that also answers .get(name), as bpy collections do."""
+
+	def get(self, name, default=None):
+		for item in self:
+			if item.name == name:
+				return item
+		return default
+
+
 class FakeSocket:
 	"""One entry on a node group's interface."""
 

@@ -379,3 +379,80 @@ class TestGeometryHashes:
 		assert {c.property_path for c in changes} == {
 			"mesh.vertex_positions", "mesh.vertex_count",
 		}
+
+
+class TestShapeKeySettings:
+	"""
+	Shape keys compare per key and per setting, paired by name.
+
+	They used to be a list of names, so value, mute, the slider range and the
+	shape itself were all invisible: an animator sliding a key from 0 to 1
+	produced no diff at all.
+
+	Pairing by name rather than position matters because inserting a key
+	shifts every one below it, and pairing by index would report all of them
+	as changed.
+	"""
+
+	@staticmethod
+	def _key(name, **overrides):
+		block = {
+			"name": name, "value": 0.0, "mute": False,
+			"slider_min": 0.0, "slider_max": 1.0,
+			"interpolation": "KEY_LINEAR", "vertex_group": None,
+			"relative_key": "Basis", "points_hash": "2:aaaa",
+		}
+		block.update(overrides)
+		return block
+
+	def _mesh(self, *keys):
+		return {
+			"vertex_count": 8,
+			"shape_keys": [k["name"] for k in keys],
+			"shape_key_data": list(keys),
+		}
+
+	def test_value_change_is_reported_per_key(self):
+		before = self._mesh(self._key("Basis"), self._key("Smile"))
+		after = self._mesh(self._key("Basis"), self._key("Smile", value=0.6))
+
+		changes = diff_mesh_data(before, after)
+		assert [c.property_path for c in changes] == ['mesh.shape_keys["Smile"].value']
+		assert changes[0].new_value == 0.6
+
+	def test_sculpting_a_key_reports_its_shape(self):
+		before = self._mesh(self._key("Smile"))
+		after = self._mesh(self._key("Smile", points_hash="2:bbbb"))
+
+		assert [c.property_path for c in diff_mesh_data(before, after)] == [
+			'mesh.shape_keys["Smile"].shape'
+		]
+
+	def test_added_key_is_reported_once(self):
+		before = self._mesh(self._key("Basis"))
+		after = self._mesh(self._key("Basis"), self._key("Smile"))
+
+		# Not twice: once as the name list changing and once as the key.
+		assert [c.property_path for c in diff_mesh_data(before, after)] == [
+			'mesh.shape_keys["Smile"]'
+		]
+
+	def test_inserting_a_key_does_not_disturb_the_others(self):
+		before = self._mesh(self._key("Basis"), self._key("Smile", value=0.5))
+		after = self._mesh(self._key("Basis"), self._key("Blink"), self._key("Smile", value=0.5))
+
+		assert [c.property_path for c in diff_mesh_data(before, after)] == [
+			'mesh.shape_keys["Blink"]'
+		]
+
+	def test_snapshots_from_before_the_feature_invent_nothing(self):
+		before = {"vertex_count": 8, "shape_keys": ["Basis", "Smile"]}
+		after = self._mesh(self._key("Basis"), self._key("Smile", value=0.6))
+
+		assert diff_mesh_data(before, after) == []
+
+	def test_a_tiny_float_difference_is_not_a_change(self):
+		before = self._mesh(self._key("Smile", value=0.5))
+		after = self._mesh(self._key("Smile", value=0.50000001))
+
+		assert diff_mesh_data(before, after) == []
