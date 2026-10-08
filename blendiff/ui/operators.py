@@ -39,6 +39,52 @@ def _orphaned_history_warning(context, mgr) -> str | None:
 	)
 
 
+def _unrelated_history_warning(context, mgr) -> str | None:
+	"""
+	Detect a sidecar whose history belongs to a different scene.
+
+	The sidecar is keyed by the .blend's path, so saving a new scene over a
+	name that was used before silently adopts that name's history. Saving an
+	untitled scene as a file somebody already had is enough to do it, and the
+	result looks entirely normal: a populated Snapshot History that has nothing
+	to do with what is on screen. Diffing against it compares two unrelated
+	scenes and reports every object as added and removed.
+
+	Shared object identities are what tells the two apart. Every snapshot
+	stamps the objects it captured, so a scene that has ever been part of this
+	history carries at least one of its ids. No overlap at all means the
+	history came from somewhere else.
+
+	A warning rather than a refusal. Replacing every object in a scene is a
+	legitimate thing to do, and it looks identical from here, so the user is
+	told and left to decide.
+	"""
+	from ..extractor.identity import read_id
+
+	known = mgr.latest_object_ids()
+	if not known:
+		return None
+
+	recorded = {value for value in known.values() if value}
+	if not recorded:
+		return None
+
+	try:
+		present = {read_id(obj) for obj in context.scene.objects}
+	except Exception:  # pragma: no cover - defensive
+		return None
+
+	if present & recorded:
+		return None
+
+	return (
+		f"BlenDiff: the {os.path.basename(mgr.sidecar_path or '.blendiff')} "
+		"beside this file holds snapshots of a different scene. Saving over a "
+		"name that was used before adopts its history. Delete those snapshots "
+		"or save under another name."
+	)
+
+
 def _extract_current_scene(
 	context,
 	stamp_identity: bool = False,
@@ -79,6 +125,30 @@ def _store_diff(context, before: dict, after: dict, title: str) -> dict:
 	wm["blendiff_result"] = json.dumps(result)
 	wm["blendiff_result_title"] = title
 	return result
+
+
+def _refresh_panels(context) -> None:
+	"""
+	Force the sidebar to redraw after the snapshot list changes.
+
+	Every row's buttons carry their snapshot id baked in at draw time. Change
+	the list without redrawing and those buttons keep pointing at what used to
+	be there: deleting one snapshot left the next row sitting under the cursor
+	still carrying the deleted id, so a second click reported "Snapshot not
+	found". It looked like Blender needed a pause between deletes. It did not,
+	it needed the panel to be told the list had changed.
+
+	Every area is tagged rather than just the current one, because the panel
+	can be open in more than one viewport and the stale rows are equally wrong
+	in all of them.
+	"""
+	try:
+		for window in context.window_manager.windows:
+			for area in window.screen.areas:
+				area.tag_redraw()
+	except AttributeError:
+		# No window manager in background runs, where there is nothing to draw.
+		pass
 
 
 def _run_diff_against_dict(context, snapshot_dict: dict, title: str = "") -> dict:
@@ -181,9 +251,12 @@ class BLENDIFF_OT_SaveSnapshot(bpy.types.Operator):
 			)
 			return {"CANCELLED"}
 
-		warning = _orphaned_history_warning(context, mgr)
-		if warning:
-			self.report({"WARNING"}, warning)
+		for warning in (
+			_orphaned_history_warning(context, mgr),
+			_unrelated_history_warning(context, mgr),
+		):
+			if warning:
+				self.report({"WARNING"}, warning)
 
 		label = self.label.strip() or f"Snapshot {mgr.snapshot_count() + 1}"
 
@@ -199,6 +272,7 @@ class BLENDIFF_OT_SaveSnapshot(bpy.types.Operator):
 				known_ids=mgr.latest_object_ids(),
 			)
 			snap = mgr.save_snapshot(label, scene_name, scene_dict)
+			_refresh_panels(context)
 			self.report({"INFO"}, f"BlenDiff: Saved snapshot '{snap.label}' ({snap.id[:8]})")
 			return {"FINISHED"}
 		except Exception as e:
@@ -377,8 +451,12 @@ class BLENDIFF_OT_DeleteSnapshot(bpy.types.Operator):
 						del wm[key]
 			self.report({"INFO"}, "BlenDiff: Snapshot deleted.")
 		else:
-			self.report({"WARNING"}, "BlenDiff: Snapshot not found.")
+			# Almost always a second click on a row that had not redrawn yet.
+			# The snapshot being gone is the state that was asked for, so this
+			# is worth saying once, not worth calling a failure.
+			self.report({"INFO"}, "BlenDiff: That snapshot was already deleted.")
 
+		_refresh_panels(context)
 		return {"FINISHED"}
 
 
