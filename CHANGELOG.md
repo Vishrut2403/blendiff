@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.0 (2026-10-08)
 
 ### Fixed
 - **Saving a new scene over an old name silently adopted its history.** The
