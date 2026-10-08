@@ -276,8 +276,6 @@ def _apply_parent(obj: Any, path: str, value: Any, context: Any) -> None:
 	world matrix and restoring it afterwards is what the Object > Parent
 	operator does, and is what a user merging a parenting change expects.
 	"""
-	import bpy
-
 	key = path.split(".", 1)[1]
 
 	if key == "parent_name":
@@ -551,6 +549,49 @@ def _apply_visibility_flag(obj: Any, path: str, value: Any, context: Any) -> Non
 	setattr(obj, path, value if isinstance(current, str) else bool(value))
 
 
+#: Keys holding a datablock reference rather than a value. Writing a name
+#: string into one would raise, so they are reported instead: pointing a
+#: curve at a different taper object is a modelling decision, not a setting.
+_OBJECT_DATA_REFERENCES = ("taper_object", "bevel_object", "font", "sound")
+
+#: data.bevel_depth, data.body, data.display_size and so on.
+#
+# The reference keys are excluded rather than rejected inside the writer, so
+# can_apply() tells the truth about them and the merge UI shows the reason
+# instead of offering a choice it would then fail to honour.
+_OBJECT_DATA_PROP = re.compile(
+	r"^data\.(?!(?:" + "|".join(_OBJECT_DATA_REFERENCES) + r")$)([a-z_]+)$"
+)
+
+
+def _apply_object_data(obj: Any, path: str, value: Any, context: Any) -> None:
+	"""
+	Write one type-specific setting: a curve's bevel, a text body, and so on.
+
+	Empties keep their settings on the object rather than in a datablock,
+	which is why the target is chosen by type rather than always being
+	obj.data.
+	"""
+	match = _OBJECT_DATA_PROP.match(path)
+	if match is None:
+		raise ValueError(f"Unsupported object data property {path!r}")
+
+	key = match.group(1)
+
+	if getattr(obj, "type", None) == "EMPTY":
+		target, attr = obj, f"empty_{key}" if key in ("display_type", "display_size", "image_depth") else key
+	else:
+		target, attr = getattr(obj, "data", None), key
+
+	if target is None:
+		raise ValueError(f"{obj.name!r} has no data to write {key!r} to.")
+	if not hasattr(target, attr):
+		raise ValueError(
+			f"{obj.name!r} has no {attr!r}; its type differs from the snapshot."
+		)
+	setattr(target, attr, value)
+
+
 #: mesh.shape_keys["Smile"].value -> key "Smile", setting "value"
 #
 # Only the settings that are a plain write. Matching every field would make
@@ -761,6 +802,7 @@ REGISTRY: tuple[ApplierEntry, ...] = (
 	),
 	ApplierEntry(re.compile(r"^camera\.[^.]+$"), _apply_camera, "Camera data"),
 	ApplierEntry(re.compile(r"^light\.[^.]+$"), _apply_light, "Light data"),
+	ApplierEntry(_OBJECT_DATA_PROP, _apply_object_data, "Object data"),
 	ApplierEntry(_MODIFIER_PROP, _apply_modifier, "Modifier setting"),
 	ApplierEntry(re.compile(r"^modifiers\.order$"), _apply_modifier_order, "Modifier order"),
 	ApplierEntry(_SHAPE_KEY_PROP, _apply_shape_key, "Shape key setting"),
@@ -791,6 +833,8 @@ UNSUPPORTED_REASONS: tuple[tuple[re.Pattern, str], ...] = (
 	 "This shape key setting references other data; set it by hand."),
 	(re.compile(r'^mesh\.shape_keys\["' + QUOTED_NAME + r'"\]$'),
 	 "BlenDiff cannot add or remove shape keys; change them on the mesh."),
+	(re.compile(r"^data\.(taper_object|bevel_object|font|sound)$"),
+	 "This setting refers to another datablock; assign it by hand."),
 	(re.compile(r"^mesh\."),
 	 "Mesh geometry is summarised, not stored — BlenDiff cannot rebuild it."),
 	(re.compile(r"^modifiers\[\d+\]\.type$"),

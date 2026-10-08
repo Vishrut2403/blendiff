@@ -46,6 +46,7 @@ DOMAIN_CAMERA = "camera_data"
 DOMAIN_LIGHT = "light_data"
 DOMAIN_MESH = "mesh_data"
 DOMAIN_ARMATURE = "armature_data"
+DOMAIN_OBJECT_DATA = "object_data"
 DOMAIN_POSE = "pose_bones"
 DOMAIN_MODIFIERS = "modifier_stack"
 DOMAIN_PARENT = "parent"
@@ -69,6 +70,7 @@ OBJECT_DOMAINS = (
 	DOMAIN_LIGHT,
 	DOMAIN_MESH,
 	DOMAIN_ARMATURE,
+	DOMAIN_OBJECT_DATA,
 	DOMAIN_POSE,
 	DOMAIN_MODIFIERS,
 	DOMAIN_PARENT,

@@ -230,6 +230,11 @@ class DiffEngine:
 				prefix="modifiers",
 			))
 
+		if schema.DOMAIN_OBJECT_DATA in domains:
+			changes.extend(self._compare_object_data(
+				obj_a.get("object_data"), obj_b.get("object_data"),
+			))
+
 		obj_type = obj_a.get("type")
 		if obj_type == "CAMERA" and schema.DOMAIN_CAMERA in domains:
 			changes.extend(diff_camera_data(
@@ -255,6 +260,38 @@ class DiffEngine:
 					prefix="pose.bones",
 				))
 
+		return changes
+
+	def _compare_object_data(
+		self,
+		data_a: dict | None,
+		data_b: dict | None,
+	) -> list[PropertyChange]:
+		"""
+		Compare the type-specific data of a curve, text, empty and the rest.
+
+		Both sides must have recorded it. None means the type has no data of
+		this kind, or the snapshot predates it being captured, and neither is
+		a change.
+		"""
+		if not isinstance(data_a, dict) or not isinstance(data_b, dict):
+			return []
+
+		changes: list[PropertyChange] = []
+		for key in sorted(set(data_a) & set(data_b)):
+			val_a, val_b = data_a[key], data_b[key]
+			if isinstance(val_a, float) or isinstance(val_b, float):
+				try:
+					if math.isclose(float(val_a), float(val_b), abs_tol=1e-6):
+						continue
+				except (TypeError, ValueError):
+					pass
+			if val_a != val_b:
+				changes.append(PropertyChange(
+					property_path=f"data.{key}",
+					old_value=val_a,
+					new_value=val_b,
+				))
 		return changes
 
 	def _compare_optional(

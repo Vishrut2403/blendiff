@@ -7,6 +7,7 @@ from .render_extractor import extract_render_settings
 from .camera_light_extractor import extract_camera_data, extract_light_data
 from .armature_extractor import extract_armature_data, extract_pose
 from .mesh_extractor import extract_mesh_data
+from .object_data_extractor import extract_object_data
 from .world_extractor import extract_world_data
 from .modifier_extractor import extract_modifier_stack
 from .parent_extractor import extract_parent_info
@@ -150,6 +151,7 @@ class SceneExtractor:
 			"light_data":      None,
 			"mesh_data":       None,
 			"armature_data":   None,
+			"object_data":     None,
 			"pose_bones":      {},
 			"modifier_stack":  [],
 			"constraint_stack":[],
@@ -194,6 +196,14 @@ class SceneExtractor:
 			data["nla_tracks"] = extract_nla_tracks(obj)
 		except Exception as exc:	
 			log.warning("Failed to extract NLA tracks for %r: %s", obj.name, exc)
+
+		# Types with no dedicated extractor of their own: curves, text,
+		# empties, lattices and the rest. Returns None for the four that have
+		# one, so the key stays absent rather than empty for them.
+		try:
+			data["object_data"] = extract_object_data(obj)
+		except Exception as exc:
+			log.warning("Failed to extract object data for %r: %s", obj.name, exc)
 
 		if obj_type == "CAMERA":
 			try:

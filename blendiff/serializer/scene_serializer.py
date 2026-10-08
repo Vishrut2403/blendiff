@@ -87,6 +87,7 @@ class SceneSerializer:
 			"light_data":      obj.get("light_data"),
 			"mesh_data":       to_jsonable(obj.get("mesh_data")),
 			"armature_data":   to_jsonable(obj.get("armature_data")),
+			"object_data":     to_jsonable(obj.get("object_data")),
 			"pose_bones":      to_jsonable(obj.get("pose_bones", {})),
 			"modifier_stack":  to_jsonable(obj.get("modifier_stack", [])),
 			"parent":           obj.get("parent"),
