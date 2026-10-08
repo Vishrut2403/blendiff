@@ -91,6 +91,10 @@ _DATA_PROPS: dict[str, list[tuple[str, str]]] = {
 		("distance_reference",   "distance_reference"),
 		("sound",                "sound"),            # resolved to a name
 	],
+	# Grease pencil as it exists from 4.3, where it was rewritten. The older
+	# GPENCIL type is deliberately absent: its datablock has none of these
+	# properties, and listing it on a guess produced a key that existed in one
+	# Blender and not another.
 	"GREASEPENCIL": [
 		("stroke_depth_order",   "stroke_depth_order"),
 	],
@@ -108,8 +112,14 @@ SUPPORTED_TYPES = frozenset(_DATA_PROPS) | {"EMPTY"}
 
 
 def _value(source, attr: str):
-	"""One attribute, with datablock references reduced to their name."""
-	value = getattr(source, attr, None)
+	"""
+	One attribute, with datablock references reduced to their name.
+
+	Raises AttributeError when the attribute is not there, rather than
+	defaulting to None, so the caller can tell "this Blender does not have it"
+	apart from "it is set to nothing".
+	"""
+	value = getattr(source, attr)
 	# Curve taper objects, text fonts and speaker sounds are all datablocks.
 	# A name is the only part of one that still means something in a snapshot.
 	if value is not None and not isinstance(value, (str, bool, int, float)):
@@ -130,7 +140,12 @@ def extract_object_data(obj) -> dict | None:
 	obj_type = getattr(obj, "type", None)
 
 	if obj_type == "EMPTY":
-		return {key: _value(obj, attr) for attr, key in _EMPTY_PROPS}
+		return {
+			key: _value(obj, attr)
+			for attr, key in _EMPTY_PROPS
+			if hasattr(obj, attr)
+		}
+
 
 	props = _DATA_PROPS.get(obj_type)
 	if props is None:
@@ -144,6 +159,13 @@ def extract_object_data(obj) -> dict | None:
 	for attr, key in props:
 		try:
 			result[key] = _value(data, attr)
+		except AttributeError:
+			# Not on this Blender. Properties come and go between versions,
+			# and recording a missing one as None would make it a value nobody
+			# set: comparing a snapshot from an older Blender against a newer
+			# one would then report every property the older build lacked as
+			# changed. Absent has to mean "not captured".
+			continue
 		except Exception as exc:
 			# One unreadable property must not cost the whole object its data.
 			log.warning("Could not read %s.%s: %s", obj_type, attr, exc)

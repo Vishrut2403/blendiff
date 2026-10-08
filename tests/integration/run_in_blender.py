@@ -1731,14 +1731,54 @@ _OBJECT_DATA_CASES = (
 	 "frame_start", 7, "data.frame_start"),
 	("SPEAKER", lambda: bpy.ops.object.speaker_add(),
 	 "volume", 0.25, "data.volume"),
-	("GREASEPENCIL", lambda: bpy.ops.object.grease_pencil_add(),
-	 "stroke_depth_order", "3D", "data.stroke_depth_order"),
+	# Grease pencil was rewritten in 4.3. Before that the operator was called
+	# gpencil_add and its datablock had none of these properties, so the case
+	# is added only when this Blender has the operator at all.
 )
+
+if hasattr(bpy.ops.object, "grease_pencil_add"):
+	_OBJECT_DATA_CASES += (
+		("GREASEPENCIL", lambda: bpy.ops.object.grease_pencil_add(),
+		 "stroke_depth_order", "3D", "data.stroke_depth_order"),
+	)
+
+
+def _usable_object_data_cases():
+	"""
+	The cases this Blender can actually run, built by trying them.
+
+	Guessing which properties a given Blender has is how this suite broke on
+	4.2: the operator existed but the datablock did not carry the property,
+	so a guard on the operator alone was not enough. Each case is set up for
+	real and kept only if the property is genuinely there.
+	"""
+	usable, skipped = [], []
+	for case in _OBJECT_DATA_CASES:
+		kind, make, attr, _value, _path = case
+		reset_scene()
+		try:
+			make()
+			obj = bpy.context.active_object
+			source = obj if obj.data is None else obj.data
+			if hasattr(source, attr):
+				usable.append(case)
+			else:
+				skipped.append(f"{kind}.{attr}")
+		except Exception as exc:
+			skipped.append(f"{kind} ({type(exc).__name__})")
+	if skipped:
+		print(f"  (not on Blender {bpy.app.version_string}: {', '.join(skipped)})")
+	return usable
 
 
 @test
 def test_every_object_type_records_its_own_data():
-	for kind, make, _attr, _value, _path in _OBJECT_DATA_CASES:
+	cases = _usable_object_data_cases()
+	# Seven types exist in every supported Blender; grease pencil only from
+	# 4.3. The floor guards against a guard that skips everything, which would
+	# otherwise pass in silence.
+	check_eq(len(cases) >= 7, True, f"at least seven types to test, got {len(cases)}")
+	for kind, make, _attr, _value, _path in cases:
 		reset_scene()
 		make()
 		obj = bpy.context.active_object
@@ -1748,7 +1788,7 @@ def test_every_object_type_records_its_own_data():
 
 @test
 def test_changing_one_setting_is_diffed_for_every_type():
-	for kind, make, attr, value, path in _OBJECT_DATA_CASES:
+	for kind, make, attr, value, path in _usable_object_data_cases():
 		reset_scene()
 		make()
 		obj = bpy.context.active_object

@@ -91,6 +91,21 @@ class TestExtraction:
 	def test_an_object_whose_data_is_missing_is_not_fatal(self):
 		assert extract_object_data(Obj("CURVE", None)) is None
 
+	def test_a_property_this_blender_lacks_is_left_out_not_recorded_as_none(self):
+		"""
+		Absent must mean "not captured", never a value.
+
+		Properties come and go between Blender versions. Recording a missing
+		one as None would make a snapshot from an older build differ from a
+		newer one on every property the older build lacked.
+		"""
+		class OldBlender:
+			resolution = 0.4
+			# no render_resolution, no threshold
+
+		data = extract_object_data(Obj("META", OldBlender()))
+		assert data == {"resolution": 0.4}
+
 	def test_one_unreadable_property_does_not_cost_the_others(self):
 		class Hostile:
 			resolution = 0.4
@@ -107,7 +122,10 @@ class TestExtraction:
 	def test_every_supported_type_is_one_blender_actually_has(self):
 		assert SUPPORTED_TYPES == {
 			"CURVE", "SURFACE", "FONT", "META", "LATTICE",
-			"EMPTY", "VOLUME", "SPEAKER", "GREASEPENCIL",
+			"EMPTY", "VOLUME", "SPEAKER",
+			# Grease pencil as rewritten in 4.3. The older GPENCIL type has
+			# none of these properties, so it is not claimed here.
+			"GREASEPENCIL",
 		}
 
 
