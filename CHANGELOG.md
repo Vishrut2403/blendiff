@@ -3,6 +3,31 @@
 ## Unreleased
 
 ### Added
+- **Snapshots can store geometry, so a mesh can be put back exactly.** A
+  snapshot recorded a digest of each mesh, which answers "did this change"
+  and cannot answer "put it back". Tick **Store geometry** when saving one
+  and the vertex positions are kept, so restoring that snapshot returns the
+  mesh to the shape it had. A point to come back to before a risky change.
+
+  Off by default, and off for automatic snapshots, because it costs orders of
+  magnitude more on disk. Measured on a two million vertex mesh: 62 MB as
+  plain JSON, 20 MB compressed as float32, 15 MB quantised to the grid the
+  digests already use. The last is what is stored, and it rides inside the
+  .blendiff, so a project folder still holds a .blend and a .blendiff and
+  nothing else.
+
+  Positions are written into the existing mesh rather than the mesh being
+  rebuilt. Rebuilding means clearing the geometry first, and that destroys
+  what hangs off it: on a sphere with UVs and a vertex group, clearing and
+  rebuilding left no UV layers and no vertex groups, while writing positions
+  left both untouched.
+
+  That only works while the topology is the one those positions belong to, so
+  a mesh whose vertex count has changed is refused with the reason rather
+  than written to. Moving vertices to positions that described different
+  geometry is worse than doing nothing, and a snapshot taken before a
+  re-mesh cannot be undone onto the re-meshed object.
+
 - **Merge applies settings on an existing constraint.** Constraint stacks
   were reported and never written, so resolving an IK influence or a Copy
   Location target did nothing while the merge counted the proposal a success.

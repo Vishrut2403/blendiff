@@ -139,7 +139,27 @@ def diff_mesh_data(
 		val_b = mesh_b.get(key)
 		path = f"{prefix}.{key}"
 
-		if key == _SHAPE_KEY_DATA:
+		if key == "stored_geometry":
+			# Not "vertex_positions": that name is already taken by the
+			# display name of the vertex digest just below, and an applier
+			# matching it was handed a hash to decode.
+			# Only when both snapshots stored them. One side having geometry
+			# and the other not is the difference between two kinds of
+			# snapshot, not a change to the mesh.
+			if key not in mesh_a or key not in mesh_b:
+				continue
+			if val_a != val_b:
+				# The real blobs, not a friendly placeholder: this is what the
+				# applier writes back, and a change that cannot be applied is
+				# the whole thing this feature exists to avoid. The panel and
+				# the report shorten them for display instead.
+				changes.append(PropertyChange(
+					property_path=f"{prefix}.stored_geometry",
+					old_value=val_a,
+					new_value=val_b,
+				))
+
+		elif key == _SHAPE_KEY_DATA:
 			# Absent on one side means that snapshot predates shape key
 			# settings being captured, not that every key just appeared.
 			if key not in mesh_a or key not in mesh_b:

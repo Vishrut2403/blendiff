@@ -1224,3 +1224,76 @@ class TestVisibilityFlagsApply:
 		result = _apply(_proposal("Cube", [("is_shadow_catcher", True)]))
 		assert not result.applied
 		assert "does not expose it" in result.failed[0].detail
+
+
+class TestRestoringStoredGeometry:
+	"""
+	Putting a mesh back to a shape a snapshot stored.
+
+	Positions are written into the existing mesh rather than the mesh being
+	rebuilt, because rebuilding destroys what hangs off the geometry. On a
+	sphere with UVs and a vertex group, clearing and rebuilding left uv=0 and
+	vgroups=0; writing positions left both intact.
+
+	That only holds while the topology is the one those positions belong to,
+	so a mismatch is refused. Moving vertices to positions that meant
+	something on different geometry is worse than doing nothing.
+	"""
+
+	@pytest.fixture
+	def meshed(self, cube):
+		from fake_bpy import FakeMesh
+
+		cube.data = FakeMesh(vertex_count=4)
+		return cube.data
+
+	@staticmethod
+	def _blob(coordinates):
+		from blendiff.extractor.geometry_store import encode_positions
+
+		return encode_positions(coordinates)
+
+	def test_positions_are_written_back(self, cube, meshed):
+		wanted = [float(i) for i in range(12)]
+
+		result = _apply(_proposal("Cube", [("mesh.stored_geometry", self._blob(wanted))]))
+
+		assert result.applied, result.failed
+		assert meshed.vertices.coordinates == pytest.approx(wanted)
+		assert meshed.updated, "the mesh was not told to update"
+
+	def test_a_changed_vertex_count_is_refused(self, cube, meshed):
+		# The snapshot holds five vertices; the mesh now has four.
+		result = _apply(_proposal("Cube", [
+			("mesh.stored_geometry", self._blob([0.0] * 15)),
+		]))
+
+		assert not result.applied
+		detail = result.failed[0].detail
+		assert "4 vertices" in detail and "stored 5" in detail
+		assert "topology changed" in detail
+
+	def test_nothing_is_written_when_it_is_refused(self, cube, meshed):
+		before = list(meshed.vertices.coordinates)
+		_apply(_proposal("Cube", [("mesh.stored_geometry", self._blob([1.0] * 15))]))
+		assert meshed.vertices.coordinates == before
+
+	def test_an_object_with_no_mesh_fails_clearly(self, cube):
+		cube.data = None
+		result = _apply(_proposal("Cube", [("mesh.stored_geometry", self._blob([0.0] * 3))]))
+		assert not result.applied
+		assert "no mesh" in result.failed[0].detail
+
+	def test_unreadable_stored_geometry_is_refused(self, cube, meshed):
+		result = _apply(_proposal("Cube", [("mesh.stored_geometry", "not a blob")]))
+		assert not result.applied
+		assert "recognised format" in result.failed[0].detail
+
+	def test_a_digest_is_not_mistaken_for_geometry(self, cube, meshed):
+		# The vertex digest is reported at mesh.vertex_positions, which this
+		# applier once matched, and it was handed a hash to decode.
+		result = _apply(_proposal("Cube", [
+			("mesh.stored_geometry", "2:40d15928362d4640ef2cdcd20542fa75"),
+		]))
+		assert not result.applied
+		assert "format '2'" in result.failed[0].detail

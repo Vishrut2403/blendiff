@@ -156,7 +156,14 @@ class BLENDIFF_PT_SnapshotHistory(bpy.types.Panel):
 			# Label + timestamp
 			col = row.column()
 			col.label(text=snap.label, icon=icon)
-			col.label(text=snap.timestamp_display())
+
+			# A snapshot that kept vertex positions restores a mesh exactly;
+			# one that did not can only put back everything else. The restore
+			# buttons look identical, so the difference is said here.
+			detail = col.row(align=True)
+			detail.label(text=snap.timestamp_display())
+			if snap.has_geometry:
+				detail.label(text="shape saved", icon="MESH_DATA")
 
 			# Action buttons
 			col = row.column(align=True)
@@ -451,6 +458,15 @@ def _wrap(text: str, width: int) -> list[str]:
 
 
 def _format_value(value) -> str:
+
+	# Stored vertex positions are a compressed blob. Forty characters of
+	# base64 tells a reader nothing; how much geometry it holds does.
+	if isinstance(value, str) and value.startswith("q1:"):
+		from ..extractor.geometry_store import decode_positions
+		try:
+			return f"{len(decode_positions(value)) // 3:,} vertex positions"
+		except Exception:
+			return "stored geometry"
 	
 	if isinstance(value, dict):
 		# Material slot dict

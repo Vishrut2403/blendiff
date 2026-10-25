@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 
 from .geometry_hash import EMPTY, extract_geometry_hashes, hash_floats
+from .geometry_store import encode_positions
 
 log = logging.getLogger(__name__)
 
@@ -71,7 +72,7 @@ def extract_shape_key_data(mesh) -> list[dict]:
 	return blocks
 
 
-def extract_mesh_data(obj) -> dict | None:
+def extract_mesh_data(obj, store_geometry: bool = False) -> dict | None:
 	"""
 	Parameters
 	----------
@@ -134,4 +135,27 @@ def extract_mesh_data(obj) -> dict | None:
 	# The digests below are what make such an edit visible at all.
 	data.update(extract_geometry_hashes(mesh))
 
+	# The positions themselves, only when asked for. A digest answers "did
+	# this change"; the positions answer "put it back", and they cost orders
+	# of magnitude more to store, so the user chooses when to pay.
+	if store_geometry:
+		stored = _store_vertex_positions(mesh)
+		if stored is not None:
+			data["stored_geometry"] = stored
+
 	return data
+
+
+def _store_vertex_positions(mesh) -> str | None:
+	"""Every vertex coordinate, packed for the sidecar, or None on failure."""
+	count = len(mesh.vertices)
+	if count == 0:
+		return None
+	try:
+		buffer = _float_buffer(count * 3)
+		mesh.vertices.foreach_get("co", buffer)
+		return encode_positions(buffer)
+	except Exception as exc:
+		# Losing the positions costs a restore, not the snapshot.
+		log.warning("Could not store positions for %r: %s", mesh.name, exc)
+		return None

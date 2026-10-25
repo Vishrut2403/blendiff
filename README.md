@@ -100,11 +100,15 @@ for the **BlenDiff** tab.
 4. Open **Snapshot History** and press play next to any snapshot to compare it
    against the current scene. To compare two saved snapshots to each other
    instead, pick them in **Compare Two Snapshots** and press Compare.
-5. To go back, press the restore button beside a snapshot. It writes that
+5. Tick **Store geometry** when saving a snapshot and its vertex positions
+   are kept too, so restoring it returns meshes to the shape they had. Much
+   larger on disk, so it is off unless you ask for it, and it cannot undo a
+   change to the topology such as a re-mesh or a subdivide.
+6. To go back, press the restore button beside a snapshot. It writes that
    snapshot's values over the scene in one undo step, and tells you what it
    could not account for. It never creates or deletes objects, so anything
    made since the snapshot is left alone.
-6. **Export HTML Report** writes a single self contained page you can send to
+7. **Export HTML Report** writes a single self contained page you can send to
    someone who does not have the file open.
 
 For a merge, take a snapshot of the common starting point, then one of each
@@ -120,10 +124,11 @@ would then discard.
 
 | Applied for you | Reported, but reconcile by hand |
 |---|---|
-| Position, rotation, scale | Mesh geometry |
-| Viewport and render visibility | A sculpted shape key |
-| Object names | Keyframes, drivers and NLA strips |
-| Collection membership | Material node graphs |
+| Position, rotation, scale | Mesh topology, such as a re-mesh |
+| Mesh shape, from a snapshot that stored geometry | A sculpted shape key |
+| Viewport and render visibility | Keyframes, drivers and NLA strips |
+| Object names | Material node graphs |
+| Collection membership | Mesh shape, without stored geometry |
 | Parenting, keeping world position | Collection visibility |
 | Pose bone transforms | Adding or removing an object |
 | Rest bones: parenting, rest pose, roll | Adding or removing a bone |

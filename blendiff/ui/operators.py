@@ -7,7 +7,7 @@ from ..extractor.scene_extractor import SceneExtractor
 from ..serializer.scene_serializer import SceneSerializer
 from ..diff_engine.diff_engine import DiffEngine
 from ..data_model.scene import SerializedScene
-from ..storage.sidecar import SidecarManager
+from ..storage.sidecar import SidecarManager, scene_stores_geometry
 from ..merge_engine.merge_engine import MergeEngine
 from ..export.diff_result import diff_to_dict
 from .registration import register_classes, unregister_classes
@@ -89,6 +89,7 @@ def _extract_current_scene(
 	context,
 	stamp_identity: bool = False,
 	known_ids: dict | None = None,
+	store_geometry: bool = False,
 ) -> tuple[dict, str]:
 	"""
 	Serialise the current scene.
@@ -101,7 +102,10 @@ def _extract_current_scene(
 	extractor = SceneExtractor()
 	serializer = SceneSerializer()
 	raw = extractor.extract(
-		context, stamp_identity=stamp_identity, known_ids=known_ids,
+		context,
+		stamp_identity=stamp_identity,
+		known_ids=known_ids,
+		store_geometry=store_geometry,
 	)
 	scene: SerializedScene = serializer.serialize(raw)
 	return scene, context.scene.name
@@ -234,12 +238,29 @@ class BLENDIFF_OT_SaveSnapshot(bpy.types.Operator):
 		default="",
 	)
 
+	store_geometry: bpy.props.BoolProperty(
+		name="Store geometry",
+		description=(
+			"Store vertex positions so this snapshot can be restored exactly. "
+			"Much larger on disk, so it is off unless you want a point to "
+			"come back to"
+		),
+		default=False,
+	)
+
 	def invoke(self, context, event):
 		self.label = f"Snapshot {_get_sidecar(context).snapshot_count() + 1}"
 		return context.window_manager.invoke_props_dialog(self)
 
 	def draw(self, context):
-		self.layout.prop(self, "label")
+		layout = self.layout
+		layout.prop(self, "label")
+		layout.prop(self, "store_geometry")
+		if self.store_geometry:
+			note = layout.column(align=True)
+			note.scale_y = 0.8
+			note.label(text="Restores mesh shape exactly. Larger on disk.", icon="INFO")
+			note.label(text="Cannot undo a re-mesh or a subdivide.")
 
 	def execute(self, context):
 		mgr = _get_sidecar(context)
@@ -270,6 +291,7 @@ class BLENDIFF_OT_SaveSnapshot(bpy.types.Operator):
 				context,
 				stamp_identity=True,
 				known_ids=mgr.latest_object_ids(),
+				store_geometry=self.store_geometry,
 			)
 			snap = mgr.save_snapshot(label, scene_name, scene_dict)
 			_refresh_panels(context)
@@ -386,7 +408,15 @@ class BLENDIFF_OT_RestoreSnapshot(bpy.types.Operator):
 			return {"CANCELLED"}
 
 		try:
-			current_dict, _ = _extract_current_scene(context)
+			# Reading the scene's own positions only matters when the snapshot
+			# has positions to compare them against. Geometry is compared only
+			# when both sides recorded it, which is right for two snapshots
+			# and would otherwise make a stored snapshot unrestorable: the
+			# live scene never has geometry unless it is asked for.
+			wants_geometry = scene_stores_geometry(snap.data)
+			current_dict, _ = _extract_current_scene(
+				context, store_geometry=wants_geometry,
+			)
 
 			# Current scene first, snapshot second, so every change's
 			# new_value is the value the snapshot holds.

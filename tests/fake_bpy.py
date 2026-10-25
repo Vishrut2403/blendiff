@@ -245,6 +245,43 @@ class FakeObject:
 		return f"<FakeObject {self._name!r}>"
 
 
+class FakeVertices(list):
+	"""
+	mesh.vertices, which the applier reads and writes through foreach_set.
+
+	Only the flat buffer behaviour matters here: three floats per vertex, in
+	vertex order, which is what Blender gives and takes.
+	"""
+
+	def __init__(self, count=0):
+		super().__init__(range(count))
+		self.coordinates = [0.0] * (count * 3)
+
+	def foreach_set(self, attr, values):
+		if attr != "co":
+			raise AttributeError(attr)
+		if len(values) != len(self.coordinates):
+			raise RuntimeError("foreach_set: wrong buffer length")
+		self.coordinates = list(values)
+
+	def foreach_get(self, attr, buffer):
+		if attr != "co":
+			raise AttributeError(attr)
+		buffer[:] = self.coordinates
+
+
+class FakeMesh:
+	"""A mesh datablock with just enough for the positions applier."""
+
+	def __init__(self, vertex_count=0, name="Mesh"):
+		self.name = name
+		self.vertices = FakeVertices(vertex_count)
+		self.updated = False
+
+	def update(self):
+		self.updated = True
+
+
 class FakeConstraint:
 	"""
 	One entry in a constraint stack, on an object or on a pose bone.

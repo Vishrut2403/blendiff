@@ -712,6 +712,51 @@ except Exception as exc:
 	traceback.print_exc()
 
 
+# Stored geometry, as the panel presents it.
+
+section("Stored geometry in the panel")
+
+try:
+	import tempfile as _tempfile
+
+	folder = _tempfile.mkdtemp(prefix="blendiff-geo-")
+	bpy.ops.wm.read_factory_settings(use_empty=True)
+	bpy.ops.mesh.primitive_uv_sphere_add(segments=16, ring_count=8)
+	geo_path = os.path.join(folder, "geo.blend")
+	bpy.ops.wm.save_as_mainfile(filepath=geo_path)
+
+	bpy.ops.blendiff.save_snapshot('EXEC_DEFAULT', label="light", store_geometry=False)
+	bpy.ops.blendiff.save_snapshot('EXEC_DEFAULT', label="with shape", store_geometry=True)
+
+	by_label = {s.label: s for s in SidecarManager(geo_path).list_snapshots()}
+	check("a plain snapshot is not marked as holding geometry",
+	      by_label["light"].has_geometry is False, "")
+	check("one saved with geometry is marked",
+	      by_label["with shape"].has_geometry is True, "")
+
+	# The two restore buttons look identical, so the list has to say which
+	# snapshot can put a mesh back and which cannot.
+	calls = draw_panel(bpy.types.BLENDIFF_PT_SnapshotHistory, ctx)
+	text = " ".join(str(c) for c in calls)
+	check("the panel says which snapshot saved the shape",
+	      "shape saved" in text, text[:200])
+	check("and does not say it for the plain one",
+	      text.count("shape saved") == 1, f"found {text.count('shape saved')}")
+
+	# The option exists on the save operator, off by default. An operator's
+	# own properties come from get_rna_type(); the class's bl_rna carries
+	# only the built-ins.
+	op_rna = bpy.ops.blendiff.save_snapshot.get_rna_type()
+	check("Store geometry is offered when saving",
+	      "store_geometry" in op_rna.properties, "")
+	check("and is off by default",
+	      op_rna.properties["store_geometry"].default is False, "")
+except Exception as exc:
+	check("stored geometry in the panel", False, f"{type(exc).__name__}: {exc}")
+	import traceback
+	traceback.print_exc()
+
+
 # 2. CLI over the sidecar this session produced
 
 section("CLI")

@@ -23,6 +23,22 @@ SIDECAR_EXTENSION = ".blendiff"
 SUPPORTED_SIDECAR_VERSIONS = ("0.1", "0.2", "0.3")
 
 
+def scene_stores_geometry(scene_dict: dict) -> bool:
+		"""
+		True when any mesh in a serialized scene kept its vertex positions.
+
+		Used to label a snapshot once, when it is written, so the panel can
+		say which ones can be restored exactly without reading every mesh on
+		every redraw.
+		"""
+		objects = scene_dict.get("objects") if isinstance(scene_dict, dict) else None
+		for obj in (objects or {}).values():
+				mesh = obj.get("mesh_data") if isinstance(obj, dict) else None
+				if isinstance(mesh, dict) and mesh.get("stored_geometry"):
+						return True
+		return False
+
+
 # Data model
 
 @dataclass
@@ -32,6 +48,14 @@ class Snapshot:
 		timestamp: str
 		scene_name: str
 		data: dict
+		#: True when this snapshot kept vertex positions, not just digests.
+		#
+		# Recorded at write time rather than worked out on every panel
+		# redraw, which would mean walking every mesh in the scene each time
+		# the sidebar draws. Absent in older sidecars, which reads as False:
+		# nothing written before the option existed stored geometry.
+		has_geometry: bool = False
+
 		#: True when a save handler took this, rather than the user.
 		#
 		# Automatic snapshots are the ones pruning is allowed to remove. A
@@ -46,6 +70,7 @@ class Snapshot:
 				scene_name: str,
 				data: dict,
 				auto: bool = False,
+				has_geometry: bool = False,
 		) -> "Snapshot":
 				return Snapshot(
 						id=str(uuid.uuid4()),
@@ -54,6 +79,7 @@ class Snapshot:
 						scene_name=scene_name,
 						data=data,
 						auto=auto,
+						has_geometry=has_geometry,
 				)
 
 		def to_dict(self) -> dict:
@@ -89,6 +115,7 @@ class Snapshot:
 						scene_name=d["scene_name"],
 						data=data,
 						auto=bool(d.get("auto", False)),
+						has_geometry=bool(d.get("has_geometry", False)),
 				)
 
 		@property
@@ -172,6 +199,7 @@ class SidecarManager:
 						scene_name=scene_name,
 						data=serialized_scene,
 						auto=auto,
+						has_geometry=scene_stores_geometry(serialized_scene),
 				)
 
 				data = self._load_raw()

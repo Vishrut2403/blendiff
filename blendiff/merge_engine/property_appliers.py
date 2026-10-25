@@ -554,6 +554,41 @@ def _apply_visibility_flag(obj: Any, path: str, value: Any, context: Any) -> Non
 #: curve at a different taper object is a modelling decision, not a setting.
 _OBJECT_DATA_REFERENCES = ("taper_object", "bevel_object", "font", "sound")
 
+def _apply_vertex_positions(obj: Any, path: str, value: Any, context: Any) -> None:
+	"""
+	Put a mesh back to the shape a snapshot recorded.
+
+	Positions are written into the existing mesh rather than the mesh being
+	rebuilt. Rebuilding means clearing the geometry first, and that destroys
+	everything hanging off it: on a sphere with UVs and a vertex group,
+	clearing and rebuilding left uv=0 and vgroups=0 while writing positions
+	left both intact.
+
+	Writing in place only works while the topology is the one those positions
+	belong to, so the vertex count has to match exactly. A snapshot taken
+	before a re-mesh cannot be applied to the re-meshed object, and refusing
+	is the only honest answer: the alternative is a mesh with its vertices
+	moved to positions that meant something on different geometry.
+	"""
+	from ..extractor.geometry_store import decode_positions
+
+	mesh = getattr(obj, "data", None)
+	if mesh is None or not hasattr(mesh, "vertices"):
+		raise ValueError(f"{obj.name!r} has no mesh to put positions into.")
+
+	coordinates = decode_positions(value)
+	expected = len(mesh.vertices) * 3
+	if len(coordinates) != expected:
+		raise ValueError(
+			f"{obj.name!r} has {len(mesh.vertices)} vertices but the snapshot "
+			f"stored {len(coordinates) // 3}; the topology changed, so the "
+			f"positions cannot be put back."
+		)
+
+	mesh.vertices.foreach_set("co", coordinates)
+	mesh.update()
+
+
 # Constraints
 #
 # The same shape as modifiers: a stack of slots, each with a type, a name, a
@@ -931,6 +966,10 @@ REGISTRY: tuple[ApplierEntry, ...] = (
 	),
 	ApplierEntry(re.compile(r"^camera\.[^.]+$"), _apply_camera, "Camera data"),
 	ApplierEntry(re.compile(r"^light\.[^.]+$"), _apply_light, "Light data"),
+	ApplierEntry(
+		re.compile(r"^mesh\.stored_geometry$"),
+		_apply_vertex_positions, "Mesh vertex positions",
+	),
 	ApplierEntry(_OBJECT_DATA_PROP, _apply_object_data, "Object data"),
 	ApplierEntry(_CONSTRAINT_PROP, _apply_constraint, "Constraint setting"),
 	ApplierEntry(_BONE_CONSTRAINT_PROP, _apply_bone_constraint, "Bone constraint setting"),

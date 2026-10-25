@@ -2044,6 +2044,107 @@ def test_adding_a_constraint_is_reported_not_applied():
 	check_eq(can_apply("constraints[0].type"), False, "retyping is not applicable")
 
 
+# Stored geometry
+#
+# The stash: a snapshot that keeps vertex positions so the mesh can be put
+# back exactly. Needs real bpy, because what matters is whether writing
+# positions into a live mesh preserves everything hanging off it.
+
+@test
+def test_geometry_is_only_stored_when_asked_for():
+	reset_scene()
+	bpy.ops.mesh.primitive_uv_sphere_add(segments=16, ring_count=8)
+	name = bpy.context.active_object.name
+
+	plain = extract()["objects"][name]["mesh_data"]
+	check_eq("stored_geometry" in plain, False, "off by default")
+
+	heavy = SceneSerializer().serialize(
+		SceneExtractor.extract(bpy.context, store_geometry=True)
+	)["objects"][name]["mesh_data"]
+	check_eq("stored_geometry" in heavy, True, "stored when asked for")
+
+
+@test
+def test_a_sculpted_mesh_is_restored_exactly():
+	import numpy as np
+	from blendiff.data_model.conflict import Resolution
+	from blendiff.merge_engine.applier import Applier
+	from blendiff.merge_engine.restore import build_restore
+
+	reset_scene()
+	bpy.ops.mesh.primitive_uv_sphere_add(segments=16, ring_count=8)
+	obj = bpy.context.active_object
+	obj.data.uv_layers.new(name="UVMap")
+	obj.vertex_groups.new(name="Weights")
+
+	def positions():
+		buffer = np.empty(len(obj.data.vertices) * 3, dtype=np.float32)
+		obj.data.vertices.foreach_get("co", buffer)
+		return buffer
+
+	original = positions().copy()
+	stored = SceneSerializer().serialize(
+		SceneExtractor.extract(bpy.context, store_geometry=True)
+	)
+
+	moved = original.copy()
+	moved[: len(moved) // 3] += 0.7
+	obj.data.vertices.foreach_set("co", moved)
+	obj.data.update()
+	check_eq(bool(np.allclose(positions(), original, atol=1e-5)), False,
+	         "the mesh really was changed")
+
+	current = SceneSerializer().serialize(
+		SceneExtractor.extract(bpy.context, store_geometry=True)
+	)
+	result = Applier().apply_all(build_restore(
+		DiffEngine().compare(current, stored), "stored"), bpy.context)
+
+	check_eq(result.failed, [], "nothing failed to apply")
+	check_eq(bool(np.allclose(positions(), original, atol=1e-5)), True,
+	         "the mesh is back to the stored shape")
+	check_eq(len(obj.data.uv_layers), 2, "UV layers survived")
+	check_eq(len(obj.vertex_groups), 1, "vertex groups survived")
+
+
+@test
+def test_a_retopologised_mesh_is_refused_not_mangled():
+	import numpy as np
+	from blendiff.merge_engine.applier import Applier
+	from blendiff.merge_engine.restore import build_restore
+
+	reset_scene()
+	bpy.ops.mesh.primitive_uv_sphere_add(segments=16, ring_count=8)
+	obj = bpy.context.active_object
+	stored = SceneSerializer().serialize(
+		SceneExtractor.extract(bpy.context, store_geometry=True)
+	)
+
+	# More vertices than the snapshot holds: those positions no longer
+	# describe this mesh, and writing them would be nonsense.
+	bpy.ops.object.modifier_add(type="SUBSURF")
+	bpy.ops.object.modifier_apply(modifier=obj.modifiers[0].name)
+
+	def positions():
+		buffer = np.empty(len(obj.data.vertices) * 3, dtype=np.float32)
+		obj.data.vertices.foreach_get("co", buffer)
+		return buffer
+
+	before = positions().copy()
+	current = SceneSerializer().serialize(
+		SceneExtractor.extract(bpy.context, store_geometry=True)
+	)
+	result = Applier().apply_all(build_restore(
+		DiffEngine().compare(current, stored), "stored"), bpy.context)
+
+	check_eq(len(result.failed) >= 1, True, "the restore was refused")
+	check_eq("topology changed" in result.failed[0].detail, True,
+	         f"and says why: {result.failed[0].detail}")
+	check_eq(bool(np.allclose(positions(), before, atol=1e-5)), True,
+	         "the mesh was left exactly as it was")
+
+
 def main() -> int:
 	passed, failed = 0, []
 

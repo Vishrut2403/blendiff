@@ -35,6 +35,7 @@ class SceneExtractor:
 		context: Any,
 		stamp_identity: bool = False,
 		known_ids: dict | None = None,
+		store_geometry: bool = False,
 	) -> dict:
 		"""
 		Extract the active scene into a plain, JSON-ready dict.
@@ -75,7 +76,9 @@ class SceneExtractor:
 		raw = {
 			"blender_version": version,
 			"scene_name":      scene.name,
-			"objects":         cls._extract_all_objects(scene, path_lookup),
+			"objects":         cls._extract_all_objects(
+				scene, path_lookup, store_geometry=store_geometry,
+			),
 			"collections":     collections,
 			"render":          extract_render_settings(scene),
 			"world":           extract_world_data(scene),
@@ -105,19 +108,27 @@ class SceneExtractor:
 		cls,
 		scene: Any,
 		path_lookup: dict[str, list[str]] | None = None,
+		store_geometry: bool = False,
 	) -> dict[str, dict]:
 		"""Return a dict keyed by object name."""
 		result: dict[str, dict] = {}
 		for obj in scene.objects:
 			try:
-				data = cls._extract_object(obj, path_lookup or {})
+				data = cls._extract_object(
+					obj, path_lookup or {}, store_geometry=store_geometry,
+				)
 				result[obj.name] = data
 			except Exception as exc:
 				log.warning("Failed to extract object %r: %s", obj.name, exc)
 		return result
 
 	@classmethod
-	def _extract_object(cls, obj: Any, path_lookup: dict[str, list[str]]) -> dict:
+	def _extract_object(
+		cls,
+		obj: Any,
+		path_lookup: dict[str, list[str]],
+		store_geometry: bool = False,
+	) -> dict:
 		"""Extract a single bpy.types.Object."""
 		obj_type = obj.type
 
@@ -219,7 +230,7 @@ class SceneExtractor:
 
 		elif obj_type == "MESH":
 			try:
-				data["mesh_data"] = extract_mesh_data(obj)
+				data["mesh_data"] = extract_mesh_data(obj, store_geometry=store_geometry)
 			except Exception as exc:
 				log.warning("Failed to extract mesh data for %r: %s", obj.name, exc)
 
