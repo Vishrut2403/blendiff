@@ -2,18 +2,12 @@
 BlenDiff — semantic diff, snapshot history and assisted merge for .blend files.
 
 Copyright (C) 2026 Vishrut Sachan
+SPDX-License-Identifier: GPL-3.0-or-later
 
-This program is free software: you can redistribute it and/or modify it under
-the terms of the GNU General Public License as published by the Free Software
-Foundation, either version 3 of the License, or (at your option) any later
-version.
-
-This program is distributed in the hope that it will be useful, but WITHOUT ANY
-WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
-PARTICULAR PURPOSE. See the GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License along with
-this program. If not, see <https://www.gnu.org/licenses/>.
+The full terms are in LICENSE, which ships inside the add-on. That file is the
+GPL itself and is kept verbatim: its own second paragraph permits copying it
+but not changing it, and a trimmed copy would no longer be the licence this
+project is under.
 
 Blender's Extensions Platform requires add-ons to be GPL-3.0-or-later, since
 anything using the bpy API is treated as a derivative of Blender itself. The
