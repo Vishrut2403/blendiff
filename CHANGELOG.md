@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Merge applies settings on an existing constraint.** Constraint stacks
+  were reported and never written, so resolving an IK influence or a Copy
+  Location target did nothing while the merge counted the proposal a success.
+  A rig's behaviour lives in these, and they are the edits most likely to
+  break one.
+
+  Influence, the enabled switch, the name and every type-specific parameter
+  are now written back, on object constraints and on pose bone constraints
+  alike. A constraint's target resolves within the scene, the same rule merge
+  targets, parents and modifier references follow.
+
+  The snapshot stores `enabled` where bpy stores `mute`, because a report
+  saying a constraint was enabled reads better than one saying it was
+  un-muted. The applier is where that inversion happens, rather than pushing
+  it onto everything that reads a snapshot.
+
+  Adding, removing and retyping a constraint stay unapplicable, and now say
+  why rather than giving a blanket reason. The snapshot records an added
+  constraint as a name and a type with no parameters, so building one from
+  that would quietly give it defaults and report success.
+
 ## 0.9.0 (2026-10-08)
 
 ### Fixed

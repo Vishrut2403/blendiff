@@ -189,6 +189,7 @@ class FakeObject:
 		self.matrix_world = FakeMatrix(name)
 		self.material_slots: list[FakeSlot] = []
 		self.modifiers: "FakeModifierStack" = FakeModifierStack()
+		self.constraints: list["FakeConstraint"] = []
 		self.library = None
 		self.override_library = None
 		self._props: dict[str, Any] = {}
@@ -244,6 +245,26 @@ class FakeObject:
 		return f"<FakeObject {self._name!r}>"
 
 
+class FakeConstraint:
+	"""
+	One entry in a constraint stack, on an object or on a pose bone.
+
+	`mute` rather than `enabled`, matching bpy: the snapshot stores the
+	inverse because "enabled" reads better in a report, and the applier is
+	what flips it back.
+	"""
+
+	def __init__(self, name, con_type="COPY_LOCATION", **params):
+		self.name = name
+		self.type = con_type
+		self.mute = False
+		self.influence = 1.0
+		self.target = None
+		self.subtarget = ""
+		for key, value in params.items():
+			setattr(self, key, value)
+
+
 class FakePoseBone:
 	"""A pose bone: settable transform channels, plus constraints."""
 
@@ -257,7 +278,7 @@ class FakePoseBone:
 		self.rotation_mode = "QUATERNION"
 		self.scale = (1.0, 1.0, 1.0)
 		self.custom_shape = None
-		self.constraints = []
+		self.constraints: list["FakeConstraint"] = []
 
 
 class FakePoseBones:

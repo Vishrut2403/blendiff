@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 import fake_bpy
 from fake_bpy import (
 	FakeCollection,
+	FakeConstraint,
 	FakeData,
 	FakeKeyBlock,
 	FakeMaterial,
@@ -570,13 +571,25 @@ class TestPoseBones:
 		assert result.applied == []
 		assert "cannot add or remove bones" in result.skipped[0].detail
 
-	def test_bone_constraints_reported_unappliable(self, bpy):
-		self._rig(bpy)
+	def test_bone_constraint_settings_are_applied(self, bpy):
+		rig = self._rig(bpy)
+		bone = rig.pose.bones.get("Head")
+		bone.constraints.append(FakeConstraint("Copy Rotation", "COPY_ROTATION"))
+
 		result = _apply(_proposal("Rig", [
 			('pose.bones["Head"].constraints[0].influence', 0.5),
 		]))
+
+		assert result.applied, result.failed
+		assert bone.constraints[0].influence == pytest.approx(0.5)
+
+	def test_adding_a_bone_constraint_is_still_reported(self, bpy):
+		self._rig(bpy)
+		result = _apply(_proposal("Rig", [
+			('pose.bones["Head"].constraints[1]', "Copy Rotation"),
+		]))
 		assert result.applied == []
-		assert "constraint" in result.skipped[0].detail.lower()
+		assert "does not record its settings" in result.skipped[0].detail
 
 
 class TestRestBones:
@@ -917,25 +930,81 @@ class TestModifierOrder:
 		assert self._order(stacked) == ["Subdivision", "Bevel", "Array"]
 
 
-class TestConstraintsExplainThemselves:
+class TestConstraintSettings:
 	"""
-	Constraint paths get the constraint reason, not the generic fallback.
+	Settings on a constraint that already exists are applied.
 
-	The reason was matched with a pattern anchored on a dot, but the diff emits
-	`constraints[0].influence`, so it never matched and the user was told only
-	that BlenDiff "cannot apply this property automatically".
+	Constraint stacks were reported and never written, which left resolving
+	an IK influence or a Copy Location target doing nothing while the merge
+	counted the proposal a success. They are the same shape as modifiers, so
+	they are applied the same way, and they refuse the same things.
 	"""
 
-	def test_constraint_paths_name_constraints_in_the_reason(self, cube):
+	@pytest.fixture
+	def constrained(self, cube):
+		cube.constraints.append(
+			FakeConstraint("Copy Location", "COPY_LOCATION", use_x=True))
+		return cube.constraints[0]
+
+	def test_influence_is_written(self, cube, constrained):
+		result = _apply(_proposal("Cube", [("constraints[0].influence", 0.25)]))
+		assert result.applied, result.failed
+		assert constrained.influence == pytest.approx(0.25)
+
+	def test_enabled_is_stored_as_the_inverse_of_mute(self, cube, constrained):
+		# The snapshot says "enabled" because that reads better in a report;
+		# bpy says "mute". The applier is where the inversion happens.
+		_apply(_proposal("Cube", [("constraints[0].enabled", False)]))
+		assert constrained.mute is True
+
+		_apply(_proposal("Cube", [("constraints[0].enabled", True)]))
+		assert constrained.mute is False
+
+	def test_a_type_specific_parameter_is_written(self, cube, constrained):
+		_apply(_proposal("Cube", [("constraints[0].use_x", False)]))
+		assert constrained.use_x is False
+
+	def test_the_target_resolves_within_the_scene(self, cube, constrained, bpy):
+		target = FakeObject("Target")
+		bpy.data.objects.add(target)
+
+		result = _apply(_proposal("Cube", [("constraints[0].target", "Target")]))
+
+		assert result.applied, result.failed
+		assert constrained.target is target
+
+	def test_a_target_outside_the_scene_fails(self, cube, constrained, bpy):
+		bpy.data.objects.add(FakeObject("Elsewhere"), in_scene=False)
+		result = _apply(_proposal("Cube", [("constraints[0].target", "Elsewhere")]))
+		assert not result.applied
+		assert "not found in the scene" in result.failed[0].detail
+
+	def test_subtarget_stays_a_plain_bone_name(self, cube, constrained):
+		_apply(_proposal("Cube", [("constraints[0].subtarget", "Head")]))
+		assert constrained.subtarget == "Head"
+
+	def test_an_empty_slot_fails_rather_than_guessing(self, cube):
+		result = _apply(_proposal("Cube", [("constraints[3].influence", 0.5)]))
+		assert not result.applied
+		assert "no constraint at slot 3" in result.failed[0].detail
+
+	def test_a_different_constraint_type_in_the_scene_is_refused(self, cube):
+		# The snapshot described a Copy Location; the scene holds a Limit
+		# Rotation, whose settings are not the same.
+		cube.constraints.append(FakeConstraint("Limit", "LIMIT_ROTATION"))
+		result = _apply(_proposal("Cube", [("constraints[0].use_offset", True)]))
+		assert not result.applied
+		assert "not a known setting of a LIMIT_ROTATION" in result.failed[0].detail
+
+	def test_structural_changes_are_still_reported(self, cube, constrained):
 		result = _apply(_proposal("Cube", [
-			("constraints[0].influence", 0.5),
-			("constraints[1]", None),
-			("constraints[0].type", "COPY_LOCATION"),
+			("constraints[1]", "Copy Rotation"),
+			("constraints[0].type", "COPY_ROTATION"),
 		]))
 		assert not result.applied
-		assert len(result.skipped) == 3
-		for outcome in result.skipped:
-			assert "Constraint stacks are not yet applicable" in outcome.detail
+		reasons = " ".join(o.detail for o in result.skipped)
+		assert "does not record its settings" in reasons
+		assert "re-create it manually" in reasons
 
 
 class TestGeometryNodesInputs:

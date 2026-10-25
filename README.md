@@ -121,19 +121,20 @@ would then discard.
 | Applied for you | Reported, but reconcile by hand |
 |---|---|
 | Position, rotation, scale | Mesh geometry |
-| Viewport and render visibility | Constraint stacks |
-| Object names | Keyframes, drivers, NLA strips |
+| Viewport and render visibility | A sculpted shape key |
+| Object names | Keyframes, drivers and NLA strips |
 | Collection membership | Material node graphs |
-| Parenting, keeping world position | Bone constraints |
-| Pose bone transforms | Adding or removing bones |
-| Rest bones: parenting, rest pose, roll | Object creation, which needs the source file |
-| Custom properties | Adding, removing or retyping a modifier |
+| Parenting, keeping world position | Collection visibility |
+| Pose bone transforms | Adding or removing an object |
+| Rest bones: parenting, rest pose, roll | Adding or removing a bone |
+| Constraint settings, on objects and bones | Adding, removing or retyping a constraint |
+| Modifier settings and stack order | Adding, removing or retyping a modifier |
+| Geometry nodes inputs | Swapping a node group |
+| Shape key value, mute and slider range | Adding or removing a shape key |
+| Curve, text, empty and lattice settings | Settings that link to another datablock |
 | Camera and light settings | |
 | Material slot assignment | |
-| Modifier settings and stack order | Collection visibility |
-| Curve, text, empty and lattice settings | Links to another datablock |
-| Geometry nodes inputs | Swapping a node group |
-| Shape key value, mute, slider range | A sculpted shape key |
+| Custom properties | |
 
 ---
 

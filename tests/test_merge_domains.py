@@ -138,10 +138,12 @@ class TestConstraintDomain:
 		tw = MergeEngine().three_way_diff(base, a, b)
 		assert tw.total_conflicts >= 1
 
-	def test_constraint_conflict_is_marked_unapplicable(self):
+	def test_a_constraint_setting_conflict_is_offered_for_resolution(self):
 		"""
-		BlenDiff can detect constraint differences but not rebuild them, and
-		must say so rather than accept a resolution it would discard.
+		Settings on an existing constraint are applicable, so the merge asks.
+
+		These used to be marked read-only along with the rest of the stack,
+		which meant resolving an IK or Copy Location influence did nothing.
 		"""
 		base = _scene({"Cube": self._with_constraint(1.0)})
 		a = _scene({"Cube": self._with_constraint(0.5)})
@@ -149,8 +151,8 @@ class TestConstraintDomain:
 
 		tw = MergeEngine().three_way_diff(base, a, b)
 		conflict = _conflicts(tw)[0]
-		assert not conflict.applicable
-		assert conflict.unsupported_reason
+		assert conflict.applicable, conflict.unsupported_reason
+		assert conflict.property_path == "constraints[0].influence"
 
 
 class TestCollectionDomain:

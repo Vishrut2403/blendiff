@@ -1907,6 +1907,143 @@ def test_automatic_snapshots_prune_and_manual_ones_do_not():
 	check_eq(labels, ["auto3", "auto4", "by hand"], "the manual one survived")
 
 
+# Constraints
+#
+# The same shape as modifiers, and merged the same way. A rig's behaviour
+# lives in these: an IK influence or a Copy Rotation target is the edit most
+# likely to break one and most worth merging back.
+
+def _constrained_cube():
+	reset_scene()
+	bpy.ops.mesh.primitive_cube_add()
+	cube = bpy.context.active_object
+	bpy.ops.object.empty_add(location=(3, 0, 0))
+	target = bpy.context.active_object
+	target.name = "Target"
+
+	constraint = cube.constraints.new("COPY_LOCATION")
+	constraint.target = target
+	return cube, constraint, target
+
+
+@test
+def test_constraint_settings_are_extracted():
+	cube, constraint, _target = _constrained_cube()
+	constraint.influence = 0.25
+	constraint.use_x = False
+
+	stack = extract()["objects"]["Cube"]["constraint_stack"]
+	check_eq(len(stack), 1, "one constraint recorded")
+	check_eq(round(stack[0]["influence"], 3), 0.25, "influence")
+	check_eq(stack[0]["enabled"], True, "enabled is the inverse of mute")
+	check_eq(stack[0]["params"]["target"], "Target", "target recorded by name")
+	check_eq(stack[0]["params"]["use_x"], False, "type-specific parameter")
+
+
+@test
+def test_constraint_changes_are_diffed_per_setting():
+	cube, constraint, _target = _constrained_cube()
+	before = extract()
+
+	constraint.influence = 0.5
+	constraint.mute = True
+	after = extract()
+
+	diff = DiffEngine().compare(before, after)
+	paths = sorted({c.property_path for d in diff.constraint_diffs for c in d.changes})
+	check_eq(paths, ["constraints[0].enabled", "constraints[0].influence"],
+	         "both settings reported separately")
+
+
+@test
+def test_constraint_settings_merge_back():
+	from blendiff.data_model.conflict import Resolution
+	from blendiff.merge_engine.applier import Applier
+	from blendiff.merge_engine.merge_engine import MergeEngine
+
+	cube, constraint, target = _constrained_cube()
+	bpy.ops.object.empty_add(location=(0, 3, 0))
+	other = bpy.context.active_object
+	other.name = "Other"
+	base = extract()
+
+	constraint.influence = 0.25
+	constraint.mute = True
+	constraint.target = other
+	version_a = extract()
+
+	constraint.influence, constraint.mute, constraint.target = 1.0, False, target
+	version_b = extract()
+
+	three_way = MergeEngine().three_way_diff(
+		base=base, version_a=version_a, version_b=version_b,
+		base_label="base", label_a="A", label_b="B",
+	)
+	for proposal in three_way.proposals:
+		for conflict in proposal.conflicts:
+			conflict.resolution = Resolution.USE_A
+
+	result = Applier().apply_all(three_way, bpy.context)
+	check_eq(result.failed, [], "nothing failed to apply")
+	check_eq(round(constraint.influence, 3), 0.25, "influence taken from A")
+	check_eq(constraint.mute, True, "disabled, taken from A")
+	check_eq(constraint.target.name, "Other", "target taken from A")
+
+
+@test
+def test_bone_constraint_settings_merge_back():
+	from blendiff.data_model.conflict import Resolution
+	from blendiff.merge_engine.applier import Applier
+	from blendiff.merge_engine.merge_engine import MergeEngine
+
+	reset_scene()
+	bpy.ops.object.empty_add()
+	target = bpy.context.active_object
+	target.name = "Target"
+
+	armature = bpy.data.armatures.new("Rig")
+	rig = bpy.data.objects.new("Rig", armature)
+	bpy.context.scene.collection.objects.link(rig)
+	bpy.context.view_layer.objects.active = rig
+	bpy.ops.object.mode_set(mode="EDIT")
+	bone = armature.edit_bones.new("Head")
+	bone.head, bone.tail = (0, 0, 0), (0, 0, 1)
+	bpy.ops.object.mode_set(mode="OBJECT")
+
+	constraint = rig.pose.bones["Head"].constraints.new("COPY_ROTATION")
+	constraint.target = target
+	base = extract()
+
+	constraint.influence = 0.5
+	version_a = extract()
+
+	constraint.influence = 1.0
+	version_b = extract()
+
+	three_way = MergeEngine().three_way_diff(
+		base=base, version_a=version_a, version_b=version_b,
+		base_label="base", label_a="A", label_b="B",
+	)
+	for proposal in three_way.proposals:
+		for conflict in proposal.conflicts:
+			conflict.resolution = Resolution.USE_A
+
+	result = Applier().apply_all(three_way, bpy.context)
+	check_eq(result.failed, [], "nothing failed to apply")
+	check_eq(round(rig.pose.bones["Head"].constraints[0].influence, 3), 0.5,
+	         "bone constraint influence taken from A")
+
+
+@test
+def test_adding_a_constraint_is_reported_not_applied():
+	from blendiff.merge_engine.property_appliers import can_apply, unsupported_reason
+
+	check_eq(can_apply("constraints[1]"), False, "adding one is not applicable")
+	check_eq("does not record its settings" in unsupported_reason("constraints[1]"),
+	         True, "and says why")
+	check_eq(can_apply("constraints[0].type"), False, "retyping is not applicable")
+
+
 def main() -> int:
 	passed, failed = 0, []
 

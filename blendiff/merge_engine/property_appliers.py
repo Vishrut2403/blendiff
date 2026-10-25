@@ -554,6 +554,135 @@ def _apply_visibility_flag(obj: Any, path: str, value: Any, context: Any) -> Non
 #: curve at a different taper object is a modelling decision, not a setting.
 _OBJECT_DATA_REFERENCES = ("taper_object", "bevel_object", "font", "sound")
 
+# Constraints
+#
+# The same shape as modifiers: a stack of slots, each with a type, a name, a
+# couple of common switches and a set of type-specific parameters. The
+# applier mirrors the modifier one deliberately, including what it refuses.
+#
+# Pose bone constraints run through the same writer. A bone's stack is
+# identical to an object's, which is why the extractor and the diff already
+# share their code, and an IK or Copy Rotation change is the edit most likely
+# to break a rig and most worth merging.
+
+#: constraints[2].influence
+_CONSTRAINT_PROP = re.compile(
+	r"^constraints\[(\d+)\]\.(?!type$)([A-Za-z_]\w*)$"
+)
+
+#: pose.bones["Head"].constraints[0].influence
+_BONE_CONSTRAINT_PROP = re.compile(
+	r'^pose\.bones\["' + QUOTED_NAME + r'"\]\.constraints\[(\d+)\]\.'
+	r"(?!type$)([A-Za-z_]\w*)$"
+)
+
+#: Fields every constraint has, whatever its type.
+#
+# "enabled" is the snapshot's name for the inverse of bpy's `mute`, because a
+# report saying a constraint was enabled reads better than one saying it was
+# un-muted. The inversion happens here rather than being pushed onto readers.
+_CONSTRAINT_COMMON = {"name", "enabled", "influence"}
+
+
+def _constraint_param_attr(constraint_type: str, key: str) -> Optional[str]:
+	"""
+	bpy attribute behind a snapshot param key, for one constraint type.
+
+	Read backwards out of the extractor's own table so the two cannot drift.
+	Looking the key up against the *live* constraint's type doubles as the
+	type guard: if the slot now holds a different kind of constraint, its keys
+	will not be in that type's table and the write is refused.
+	"""
+	from ..extractor.constraint_extractor import _CONSTRAINT_PROPS
+
+	for bpy_attr, output_key in _CONSTRAINT_PROPS.get(constraint_type, []):
+		if output_key == key:
+			return bpy_attr
+	return None
+
+
+def _write_constraint(con: Any, key: str, value: Any, context: Any) -> None:
+	"""Write one setting on a constraint that already exists."""
+	if key == "name":
+		con.name = value
+		return
+	if key == "enabled":
+		con.mute = not bool(value)
+		return
+	if key == "influence":
+		con.influence = float(value)
+		return
+
+	attr = _constraint_param_attr(con.type, key)
+	if attr is None:
+		raise ValueError(
+			f"{key!r} is not a known setting of a {con.type} constraint; "
+			f"this slot is {con.type} in this scene."
+		)
+
+	# A constraint's target is an object, stored by name. subtarget is a bone
+	# name and stays a plain string.
+	if attr == "target":
+		if value is None:
+			con.target = None
+			return
+		target = scene_object(context, value)
+		if target is None:
+			raise ValueError(f"Constraint target {value!r} not found in the scene.")
+		con.target = target
+		return
+
+	setattr(con, attr, value)
+
+
+def _constraint_at(stack: Any, index: int, owner: str) -> Any:
+	"""One slot of a constraint stack, or a refusal naming what is there."""
+	if index >= len(stack):
+		raise ValueError(
+			f"{owner} has no constraint at slot {index}; the stack differs "
+			f"from the snapshot."
+		)
+	return stack[index]
+
+
+def _apply_constraint(obj: Any, path: str, value: Any, context: Any) -> None:
+	"""
+	Write one setting on an existing object constraint.
+
+	Adding, removing and retyping stay unapplicable for the same reason they
+	do for modifiers: the snapshot records an added constraint as a name and a
+	type with no parameters, so building one from that would quietly give it
+	defaults and report success.
+	"""
+	match = _CONSTRAINT_PROP.match(path)
+	if match is None:
+		raise ValueError(f"Unsupported constraint property {path!r}")
+
+	index, key = int(match.group(1)), match.group(2)
+	con = _constraint_at(obj.constraints, index, repr(obj.name))
+	_write_constraint(con, key, value, context)
+
+
+def _apply_bone_constraint(obj: Any, path: str, value: Any, context: Any) -> None:
+	"""Write one setting on an existing pose bone constraint."""
+	match = _BONE_CONSTRAINT_PROP.match(path)
+	if match is None:
+		raise ValueError(f"Unsupported bone constraint property {path!r}")
+
+	bone_name = unescape_name(match.group(1))
+	index, key = int(match.group(2)), match.group(3)
+
+	pose = getattr(obj, "pose", None)
+	if pose is None:
+		raise ValueError(f"{obj.name!r} has no pose; it is not an armature.")
+	bone = pose.bones.get(bone_name)
+	if bone is None:
+		raise ValueError(f"{obj.name!r} has no pose bone named {bone_name!r}.")
+
+	con = _constraint_at(bone.constraints, index, f"bone {bone_name!r}")
+	_write_constraint(con, key, value, context)
+
+
 #: data.bevel_depth, data.body, data.display_size and so on.
 #
 # The reference keys are excluded rather than rejected inside the writer, so
@@ -803,6 +932,8 @@ REGISTRY: tuple[ApplierEntry, ...] = (
 	ApplierEntry(re.compile(r"^camera\.[^.]+$"), _apply_camera, "Camera data"),
 	ApplierEntry(re.compile(r"^light\.[^.]+$"), _apply_light, "Light data"),
 	ApplierEntry(_OBJECT_DATA_PROP, _apply_object_data, "Object data"),
+	ApplierEntry(_CONSTRAINT_PROP, _apply_constraint, "Constraint setting"),
+	ApplierEntry(_BONE_CONSTRAINT_PROP, _apply_bone_constraint, "Bone constraint setting"),
 	ApplierEntry(_MODIFIER_PROP, _apply_modifier, "Modifier setting"),
 	ApplierEntry(re.compile(r"^modifiers\.order$"), _apply_modifier_order, "Modifier order"),
 	ApplierEntry(_SHAPE_KEY_PROP, _apply_shape_key, "Shape key setting"),
@@ -821,8 +952,11 @@ UNSUPPORTED_REASONS: tuple[tuple[re.Pattern, str], ...] = (
 	 "BlenDiff cannot add or remove bones; edit the rig directly."),
 	(re.compile(r"^armature\.(name|bone_count|collections)$"),
 	 "Derived from the rig itself; change it in the armature."),
-	(re.compile(r'^pose\.bones\["' + QUOTED_NAME + r'"\]\.constraints'),
-	 "Bone constraints are not yet applicable; re-create the constraint manually."),
+	(re.compile(r'^pose\.bones\["' + QUOTED_NAME + r'"\]\.constraints\[\d+\]\.type$'),
+	 "Changing a constraint's type replaces it; re-create it manually."),
+	(re.compile(r'^pose\.bones\["' + QUOTED_NAME + r'"\]\.constraints\[\d+\]$'),
+	 "Adding or removing a bone constraint is not applicable; the snapshot "
+	 "does not record its settings."),
 	(re.compile(r'^pose\.bones\["' + QUOTED_NAME + r'"\]$'),
 	 "BlenDiff cannot add or remove bones; edit the rig directly."),
 	(re.compile(r"^pose\.bones\.[^.]+\.custom_shape$"),
@@ -844,11 +978,13 @@ UNSUPPORTED_REASONS: tuple[tuple[re.Pattern, str], ...] = (
 	(re.compile(r"^modifiers\[\d+\]$"),
 	 "Adding or removing a modifier is not applicable; the snapshot does not "
 	 "record its settings."),
-	# The diff emits constraints[0].influence and the like, so a pattern
-	# anchored on a dot never matched and these fell through to the generic
-	# reason, which told the user nothing about why.
+	(re.compile(r"^constraints\[\d+\]\.type$"),
+	 "Changing a constraint's type replaces it; re-create it manually."),
+	(re.compile(r"^constraints\[\d+\]$"),
+	 "Adding or removing a constraint is not applicable; the snapshot does "
+	 "not record its settings."),
 	(re.compile(r"^constraints?[\[.]"),
-	 "Constraint stacks are not yet applicable; re-create the constraint manually."),
+	 "This constraint change must be made by hand."),
 	(re.compile(r"^fcurves?\."),
 	 "Animation curves are summarised, not stored — keyframes cannot be rebuilt."),
 	(re.compile(r"^drivers?\."),
