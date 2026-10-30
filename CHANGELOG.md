@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### Changed
+- **The sidecar format is 1.0, and the compatibility promise is written
+  down.** Files said `0.3` while the add-on was heading for 1.0, which is a
+  small lie with a long tail: the version in a file is the only thing a
+  future reader has to go on.
+
+  From 1.0 onwards, any 1.x BlenDiff reads any sidecar written by any other
+  1.x, and every older format keeps opening. A snapshot is somebody's
+  history, and history that stops opening when the add-on updates is not
+  history. The README says so in as many words.
+
+  `SUPPORTED_SIDECAR_VERSIONS` was declared and never consulted, so a file
+  written by a future BlenDiff was read as though it were current. It is read
+  anyway, since refusing would lock somebody out of their own history over a
+  version string, but now it says so. The tests build a 0.1, 0.2 and 0.3 file
+  by hand and read them, rather than asserting that a constant has a
+  particular value, because the constant is not the thing that breaks.
+
 ### Added
 - **Snapshots can store geometry, so a mesh can be put back exactly.** A
   snapshot recorded a digest of each mesh, which answers "did this change"

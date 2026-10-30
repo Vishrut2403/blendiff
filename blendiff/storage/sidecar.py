@@ -14,13 +14,26 @@ from .object_store import collect_garbage, pack_scene, pool_stats, unpack_scene
 
 log = logging.getLogger(__name__)
 
-SIDECAR_VERSION = "0.3"
+#: Version stamped into every sidecar this BlenDiff writes.
+#
+# The format promise, from 1.0 onwards: any 1.x BlenDiff reads any sidecar
+# written by any other 1.x, and every older format keeps opening. A snapshot
+# is somebody's history, and history that stops opening when the add-on
+# updates is not history.
+#
+# Keeping this at "0.3" while the add-on was called 1.0 would have been a
+# small lie with a long tail: the number in the file is the only thing a
+# future reader has to go on.
+SIDECAR_VERSION = "1.0"
 SIDECAR_EXTENSION = ".blendiff"
 
-# Sidecar files written by these versions are readable by the current loader.
-# 0.3 introduced the shared object pool; earlier files store objects inline and
-# are packed automatically the next time the sidecar is written.
-SUPPORTED_SIDECAR_VERSIONS = ("0.1", "0.2", "0.3")
+# Formats this loader understands.
+#
+# 0.1 and 0.2 store objects inline; 0.3 introduced the shared object pool and
+# both are packed into it the next time the sidecar is written. 1.0 is 0.3's
+# layout with a version that matches the add-on, so nothing has to be migrated
+# between them.
+SUPPORTED_SIDECAR_VERSIONS = ("0.1", "0.2", "0.3", "1.0")
 
 
 def scene_stores_geometry(scene_dict: dict) -> bool:
@@ -411,6 +424,21 @@ class SidecarManager:
 						log.warning("Sidecar object pool is a %s, not an object; ignoring it.",
 									type(pool).__name__)
 						data = dict(data, objects={})
+
+				# SUPPORTED_SIDECAR_VERSIONS was declared and never consulted, so
+				# a file written by a future BlenDiff was read as though it were
+				# current. Reading it anyway is still the right behaviour, since
+				# refusing would lock somebody out of their own history over a
+				# version string, but saying so turns a confusing result into an
+				# explained one.
+				written_by = data.get("blendiff_version")
+				if written_by and written_by not in SUPPORTED_SIDECAR_VERSIONS:
+						log.warning(
+								"Sidecar was written by BlenDiff format %s, which this "
+								"version does not know. Reading it anyway; some of it may "
+								"not be understood.",
+								written_by,
+						)
 
 				return data
 

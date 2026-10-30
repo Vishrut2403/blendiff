@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from blendiff.storage.sidecar import (
 	SidecarManager, Snapshot, SIDECAR_EXTENSION, SIDECAR_VERSION,
+	SUPPORTED_SIDECAR_VERSIONS,
 )
 from blendiff.data_model.schema import SCHEMA_VERSION
 
@@ -735,3 +736,111 @@ class TestAutomaticSnapshots:
 		assert mgr.prune_auto_snapshots(keep=0) == 0
 		assert mgr.prune_auto_snapshots(keep=-5) == 0
 		assert len(mgr.list_snapshots()) == 3
+
+
+class TestTheFormatPromise:
+	"""
+	Any 1.x BlenDiff reads any sidecar written by any other 1.x, and every
+	older format keeps opening.
+
+	A snapshot is somebody's history, and history that stops opening when the
+	add-on updates is not history. These tests build each old format by hand
+	and read it, rather than asserting that a version constant has a
+	particular value, because the constant is not what breaks.
+	"""
+
+	def _blend(self, tmp_path):
+		blend = tmp_path / "scene.blend"
+		blend.write_text("")
+		return blend
+
+	def _write(self, tmp_path, payload):
+		blend = self._blend(tmp_path)
+		(tmp_path / "scene.blendiff").write_text(json.dumps(payload))
+		return SidecarManager(str(blend))
+
+	@staticmethod
+	def _snapshot(label, objects):
+		return {
+			"id": f"id-{label}",
+			"label": label,
+			"timestamp": "2026-01-01T00:00:00+00:00",
+			"scene_name": "Scene",
+			"data": {"objects": objects},
+		}
+
+	@pytest.mark.parametrize("version", ["0.1", "0.2", "0.3"])
+	def test_every_older_format_still_opens(self, tmp_path, version):
+		# 0.1 and 0.2 store objects inline; 0.3 added the shared pool but an
+		# inline scene is still valid in it.
+		mgr = self._write(tmp_path, {
+			"blendiff_version": version,
+			"blend_file": "scene.blend",
+			"snapshots": [self._snapshot("old", {"Cube": {"name": "Cube"}})],
+		})
+
+		snapshots = mgr.list_snapshots()
+		assert [s.label for s in snapshots] == ["old"]
+		assert snapshots[0].data["objects"]["Cube"]["name"] == "Cube"
+
+	def test_a_0_3_sidecar_using_the_object_pool_still_opens(self, tmp_path):
+		# The pool is what 0.3 introduced: objects stored once by digest and
+		# referenced from each snapshot.
+		blend = self._blend(tmp_path)
+		mgr = SidecarManager(str(blend))
+		mgr.save_snapshot("packed", "Scene", {"objects": {"Cube": {"name": "Cube"}}})
+
+		raw = json.load(open(mgr.sidecar_path))
+		raw["blendiff_version"] = "0.3"
+		json.dump(raw, open(mgr.sidecar_path, "w"))
+
+		reopened = SidecarManager(str(blend)).list_snapshots()
+		assert [s.label for s in reopened] == ["packed"]
+
+	def test_what_this_version_writes_is_what_it_claims(self, tmp_path):
+		blend = self._blend(tmp_path)
+		mgr = SidecarManager(str(blend))
+		mgr.save_snapshot("v1", "Scene", {"objects": {}})
+
+		written = json.load(open(mgr.sidecar_path))["blendiff_version"]
+		assert written == SIDECAR_VERSION
+		assert written in SUPPORTED_SIDECAR_VERSIONS
+
+	def test_every_supported_version_is_readable(self, tmp_path):
+		"""The list must not claim support it does not have."""
+		for version in SUPPORTED_SIDECAR_VERSIONS:
+			mgr = self._write(tmp_path, {
+				"blendiff_version": version,
+				"blend_file": "scene.blend",
+				"snapshots": [self._snapshot("s", {})],
+			})
+			assert [s.label for s in mgr.list_snapshots()] == ["s"], version
+
+	def test_a_future_format_is_read_and_flagged(self, tmp_path, caplog):
+		"""
+		Refusing would lock somebody out of their own history over a version
+		string, so it reads anyway and says what it did.
+		"""
+		mgr = self._write(tmp_path, {
+			"blendiff_version": "99.0",
+			"blend_file": "scene.blend",
+			"snapshots": [self._snapshot("from the future", {})],
+		})
+
+		with caplog.at_level("WARNING"):
+			snapshots = mgr.list_snapshots()
+
+		assert [s.label for s in snapshots] == ["from the future"]
+		assert "99.0" in caplog.text
+
+	def test_a_known_version_is_not_flagged(self, tmp_path, caplog):
+		mgr = self._write(tmp_path, {
+			"blendiff_version": SIDECAR_VERSION,
+			"blend_file": "scene.blend",
+			"snapshots": [self._snapshot("current", {})],
+		})
+
+		with caplog.at_level("WARNING"):
+			mgr.list_snapshots()
+
+		assert "does not know" not in caplog.text

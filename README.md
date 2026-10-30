@@ -143,6 +143,47 @@ would then discard.
 
 ---
 
+## What it cannot do
+
+BlenDiff is honest about its limits rather than letting you find them during
+a merge. The things it will not do, and why:
+
+- **It never creates or deletes objects.** An object in a snapshot but not in
+  your scene was deleted since, and nothing in a snapshot can rebuild it. One
+  in your scene but not in the snapshot was made since, and removing it while
+  claiming to restore is not something a tool should do quietly. Both are
+  reported.
+- **It cannot undo a change to mesh topology.** A snapshot that stored
+  geometry puts vertices back where they were, which covers sculpting and
+  moving things. A re-mesh, a subdivide or anything that changes the vertex
+  count leaves those positions describing geometry that no longer exists, so
+  the restore is refused rather than applied.
+- **Keyframes, drivers and NLA strips are summarised, not stored.** A diff
+  tells you a channel changed; it cannot rebuild the curve.
+- **Material node graphs are compared but not written back.** Rewiring a
+  shader is reported node by node and reconciled by hand.
+- **Adding, removing or retyping a modifier or constraint is reported only.**
+  A snapshot records an added one by name and type with no settings, so
+  creating it would quietly give it defaults and call that a success.
+
+Everything it does apply is in the table above, and anything it cannot is
+shown read only in the merge panel with the reason, so you are never asked to
+choose a value it would then discard.
+
+---
+
+## The .blendiff file
+
+Your history lives in a single JSON file beside the `.blend`. It is plain
+text, so you can read it, and version it alongside the `.blend` if you want.
+
+From 1.0 onwards the format carries a promise: **any 1.x BlenDiff reads any
+sidecar written by any other 1.x, and every older format keeps opening.**
+Files written by the 0.1, 0.2 and 0.3 formats are still read today and are
+upgraded in place the next time they are written. A file from a newer
+BlenDiff than yours is read anyway, with a warning, because locking you out
+of your own history over a version string would be the worse failure.
+
 ## Also available as a Python library
 
 BlenDiff installs from PyPI as a plain Python package, with no Blender required,
