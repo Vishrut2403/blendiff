@@ -1,4 +1,6 @@
 import json
+import re
+
 import bpy
 
 from ..storage.sidecar import SidecarManager
@@ -465,7 +467,18 @@ def _wrap(text: str, width: int) -> list[str]:
 	return lines
 
 
+#: A versioned content digest, as geometry_hash writes them.
+_DIGEST = re.compile(r"^\d+:[0-9a-f]{8,}$")
+
+
 def _format_value(value) -> str:
+
+	# A content digest is a fingerprint, not a value. Thirty-two characters
+	# of hex tells a reader nothing except that two things differ, which the
+	# property path above already said, so it is shortened to something that
+	# reads as an identifier rather than as data.
+	if isinstance(value, str) and _DIGEST.match(value):
+		return "#" + value.split(":", 1)[1][:8]
 
 	# Stored vertex positions are a compressed blob. Forty characters of
 	# base64 tells a reader nothing; how much geometry it holds does.

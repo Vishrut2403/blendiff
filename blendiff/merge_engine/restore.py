@@ -38,6 +38,25 @@ from ..data_model.diff import ChangeKind
 log = logging.getLogger(__name__)
 
 
+#: Facts about a mesh that follow from its vertex positions.
+#
+# A digest of the positions, and the bounding box they describe, are
+# observations rather than settings. Once the positions themselves are
+# written back, these are true again by construction.
+#
+# They are only dropped when the geometry really is being restored. In a
+# merge, and in a restore from a snapshot that did not store geometry, they
+# stay: there they are the only evidence the mesh changed at all.
+_IMPLIED_BY_GEOMETRY = frozenset((
+	"mesh.vertex_positions",
+	"mesh.bbox_min",
+	"mesh.bbox_max",
+))
+
+#: The change that carries the positions themselves.
+_STORED_GEOMETRY = "mesh.stored_geometry"
+
+
 def build_restore(scene_diff: Any, label: str = "snapshot") -> ThreeWayDiff:
 	"""
 	Turn a current-scene-to-snapshot diff into something the Applier accepts.
@@ -63,7 +82,19 @@ def build_restore(scene_diff: Any, label: str = "snapshot") -> ThreeWayDiff:
 			object_name=obj_diff.name,
 			previous_name=obj_diff.previous_name,
 		)
+
+		# Restoring the positions makes the digest and the bounding box
+		# right again on its own. Leaving them in meant a restore that had
+		# done exactly what was asked reported "applied 1, 2 not applicable",
+		# which reads as a partial failure.
+		restoring_geometry = any(
+			change.property_path == _STORED_GEOMETRY
+			for change in obj_diff.changes
+		)
+
 		for change in obj_diff.changes:
+			if restoring_geometry and change.property_path in _IMPLIED_BY_GEOMETRY:
+				continue
 			proposal.non_conflicting_from_a.append(NonConflictingChange(
 				property_path=change.property_path,
 				base_value=change.old_value,

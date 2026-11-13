@@ -120,3 +120,74 @@ class TestUnrestorableObjects:
 		diff = _scene_diff(_modified("Cube", [("hide_render", True, False)]))
 
 		assert unrestorable_objects(diff) == {"missing": [], "extra": []}
+
+
+class TestFactsImpliedByRestoredGeometry:
+	"""
+	A restore that did exactly what was asked must not report failures.
+
+	Restoring vertex positions makes the digest of those positions, and the
+	bounding box they describe, true again by construction. Leaving them in
+	the proposal meant a successful restore reported "applied 1, 2 not
+	applicable", which reads as a partial failure and sends the user looking
+	for what broke.
+	"""
+
+	def test_derived_facts_are_dropped_when_geometry_is_restored(self):
+		diff = _scene_diff(_modified("Sphere", [
+			("mesh.stored_geometry", "q1:old", "q1:new"),
+			("mesh.vertex_positions", "2:aaa", "2:bbb"),
+			("mesh.bbox_min", [0, 0, 0], [1, 1, 1]),
+			("mesh.bbox_max", [1, 1, 1], [2, 2, 2]),
+		]))
+
+		paths = [
+			c.property_path
+			for c in build_restore(diff).proposals[0].non_conflicting_from_a
+		]
+		assert paths == ["mesh.stored_geometry"]
+
+	def test_they_are_kept_when_geometry_is_not_being_restored(self):
+		# Without stored positions these digests are the only evidence the
+		# mesh changed at all, so the user still needs to see them.
+		diff = _scene_diff(_modified("Sphere", [
+			("mesh.vertex_positions", "2:aaa", "2:bbb"),
+			("mesh.bbox_min", [0, 0, 0], [1, 1, 1]),
+		]))
+
+		paths = [
+			c.property_path
+			for c in build_restore(diff).proposals[0].non_conflicting_from_a
+		]
+		assert paths == ["mesh.vertex_positions", "mesh.bbox_min"]
+
+	def test_other_changes_on_the_same_object_still_apply(self):
+		diff = _scene_diff(_modified("Sphere", [
+			("mesh.stored_geometry", "q1:old", "q1:new"),
+			("mesh.vertex_positions", "2:aaa", "2:bbb"),
+			("transform.location", [0, 0, 0], [1, 0, 0]),
+			("hide_render", True, False),
+		]))
+
+		paths = [
+			c.property_path
+			for c in build_restore(diff).proposals[0].non_conflicting_from_a
+		]
+		assert paths == ["mesh.stored_geometry", "transform.location", "hide_render"]
+
+	def test_one_object_restoring_geometry_does_not_affect_another(self):
+		diff = _scene_diff(
+			_modified("Sphere", [
+				("mesh.stored_geometry", "q1:old", "q1:new"),
+				("mesh.vertex_positions", "2:aaa", "2:bbb"),
+			]),
+			_modified("Cube", [("mesh.vertex_positions", "2:ccc", "2:ddd")]),
+		)
+
+		by_name = {p.object_name: p for p in build_restore(diff).proposals}
+		assert [c.property_path for c in by_name["Sphere"].non_conflicting_from_a] == [
+			"mesh.stored_geometry"
+		]
+		assert [c.property_path for c in by_name["Cube"].non_conflicting_from_a] == [
+			"mesh.vertex_positions"
+		]

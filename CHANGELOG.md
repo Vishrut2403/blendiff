@@ -3,6 +3,12 @@
 ## Unreleased
 
 ### Changed
+- **Content digests are shown as short fingerprints.** A changed digest was
+  printed in full, so a repainted vertex group read as seventy characters of
+  hex across two lines. A digest is a fingerprint rather than a value, and
+  the property path above it already says what changed, so it now renders as
+  `#9ecebe89` instead.
+
 - **The sidecar format is 1.0, and the compatibility promise is written
   down.** Files said `0.3` while the add-on was heading for 1.0, which is a
   small lie with a long tail: the version in a file is the only thing a
@@ -21,6 +27,17 @@
   particular value, because the constant is not the thing that breaks.
 
 ### Fixed
+- **A successful restore reported failures it had not had.** Restoring vertex
+  positions makes the digest of those positions, and the bounding box they
+  describe, true again by construction. They were still listed as changes to
+  apply, and since neither can be written, a restore that did exactly what
+  was asked reported "applied 1, 2 not applicable", which reads as a partial
+  failure and sends you looking for what broke.
+
+  Facts implied by the restored geometry are dropped from the proposal. Only
+  when the geometry really is being restored: without stored positions those
+  digests are the only evidence the mesh changed at all.
+
 - **Comparing against another file reported a visibility change on every
   object.** `visible_get()` answers for the *active* view layer. An object in
   a scene linked from another .blend is not in it, and the call returns False

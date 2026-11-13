@@ -2277,10 +2277,16 @@ def test_nothing_is_left_attached_afterwards():
 	from blendiff.extractor.foreign import extract_scene_from_file
 
 	_mine, theirs = _two_files()
+
+	# Whether the comparison *changes* the modified flag, not whether the
+	# flag is false. In background mode is_dirty reads True after a plain
+	# save or open with no add-on loaded at all, so an absolute assertion
+	# here would be testing Blender's background quirks rather than BlenDiff.
+	before = bpy.data.is_dirty
 	extract_scene_from_file(theirs)
 
 	check_eq(len(bpy.data.libraries), 0, "no library left behind")
-	check_eq(bpy.data.is_dirty, False, "the file was not marked modified")
+	check_eq(bpy.data.is_dirty, before, "the comparison did not modify the file")
 
 
 @test
@@ -2398,6 +2404,48 @@ def test_a_compared_file_reports_no_phantom_visibility_change():
 		for c in o.changes
 	]
 	check_eq(paths, ["transform.location"], "only the real change is reported")
+
+
+@test
+def test_a_successful_restore_reports_no_failures():
+	"""
+	The report after a restore must match what happened.
+
+	Restoring positions makes the digest of those positions true again by
+	construction, so leaving it in the proposal made a restore that worked
+	report "applied 1, 2 not applicable". That reads as a partial failure.
+	"""
+	import numpy as np
+	from blendiff.merge_engine.applier import Applier
+	from blendiff.merge_engine.restore import build_restore
+
+	reset_scene()
+	bpy.ops.mesh.primitive_uv_sphere_add(segments=16, ring_count=8)
+	obj = bpy.context.active_object
+
+	def stored_snapshot():
+		return SceneSerializer().serialize(
+			SceneExtractor.extract(bpy.context, store_geometry=True)
+		)
+
+	stored = stored_snapshot()
+
+	buffer = np.empty(len(obj.data.vertices) * 3, dtype=np.float32)
+	obj.data.vertices.foreach_get("co", buffer)
+	moved = buffer.copy()
+	moved[:30] += 0.8
+	obj.data.vertices.foreach_set("co", moved)
+	obj.data.update()
+
+	result = Applier().apply_all(
+		build_restore(DiffEngine().compare(stored_snapshot(), stored), "stored"),
+		bpy.context,
+	)
+
+	check_eq(result.failed, [], "nothing failed")
+	check_eq([o.property_path for o in result.skipped], [],
+	         "and nothing was reported as not applicable")
+	check_eq(len(result.applied), 1, "exactly the geometry was written")
 
 
 def main() -> int:
