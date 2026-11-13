@@ -2448,6 +2448,38 @@ def test_a_successful_restore_reports_no_failures():
 	check_eq(len(result.applied), 1, "exactly the geometry was written")
 
 
+@test
+def test_timeline_markers_and_units_are_captured_and_diffed():
+	"""Needs real bpy: markers bind cameras and units cascade."""
+	reset_scene()
+	scene = bpy.context.scene
+	bpy.ops.object.camera_add()
+	camera = bpy.context.view_layer.objects.active
+	first = scene.timeline_markers.new("shot_010", frame=24)
+	scene.timeline_markers.new("shot_020", frame=72)
+
+	before = extract()
+	check_eq([m["name"] for m in before["timeline_markers"]],
+	         ["shot_010", "shot_020"], "markers captured in frame order")
+	check_eq(before["unit_settings"]["system"], "METRIC", "units captured")
+
+	scene.timeline_markers["shot_020"].frame = 96
+	first.camera = camera
+	scene.timeline_markers.new("shot_030", frame=120)
+	scene.unit_settings.system = "IMPERIAL"
+	after = extract()
+
+	diff = DiffEngine().compare(before, after)
+	check_eq(sorted(c.property_path for c in diff.marker_changes),
+	         ['markers["shot_010"].camera', 'markers["shot_020"].frame',
+	          'markers["shot_030"]'],
+	         "each marker change reported once")
+	check_eq("units.system" in [c.property_path for c in diff.unit_changes],
+	         True, "the unit system change reported")
+	check_eq(DiffEngine().compare(after, extract()).has_changes, False,
+	         "an unchanged scene stays clean")
+
+
 def main() -> int:
 	passed, failed = 0, []
 

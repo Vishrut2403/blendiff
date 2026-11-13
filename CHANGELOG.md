@@ -49,6 +49,18 @@
   captured" rather than as a value nobody set.
 
 ### Added
+- **Timeline markers and unit settings are compared.** Neither was captured.
+  Markers record shot boundaries and can bind a camera, so moving one changes
+  where an edit lands and a changed binding changes what renders, and none of
+  it produced a diff. Units decide what every number in the file means:
+  switching a scene from metric to imperial leaves the geometry untouched and
+  every measurement reading differently, which is exactly the change nobody
+  notices until much later.
+
+  Markers are matched by name rather than position, so inserting one does not
+  report every marker after it as changed, and a name containing a quote goes
+  through the same escaping the rest of the paths use.
+
 - **Compare this file against another .blend.** BlenDiff could only ever
   compare a file against its own history. The question it could not answer
   is the one people reach for version control to settle: what is different

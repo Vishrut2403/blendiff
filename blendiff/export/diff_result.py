@@ -50,6 +50,8 @@ _SUMMARY_LABELS = (
 	("driver_changes", "Drivers"),
 	("nla_changes", "NLA"),
 	("scene_custom_prop_changes", "Scene Props"),
+	("marker_changes", "Markers"),
+	("unit_changes", "Units"),
 )
 
 
@@ -124,6 +126,8 @@ def diff_to_dict(diff: SceneDiff) -> dict[str, Any]:
 			diff.scene_custom_prop_diff.changes
 			if diff.scene_custom_prop_diff else []
 		),
+		"marker_changes": _changes(diff.marker_changes),
+		"unit_changes": _changes(diff.unit_changes),
 	}
 
 	for attr, key in _DOMAIN_KEYS:

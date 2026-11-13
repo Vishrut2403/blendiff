@@ -33,6 +33,8 @@ class SceneSerializer:
 			"render": self._serialize_render(raw.get("render", {})),
 			"world":  self._serialize_world(raw.get("world")),
 			"scene_custom_props": to_jsonable(raw.get("scene_custom_props", {})),
+			"timeline_markers": to_jsonable(raw.get("timeline_markers", [])),
+			"unit_settings":   to_jsonable(raw.get("unit_settings", {})),
 		}
 
 		# Carry the extractor's schema stamp through untouched. Without it the

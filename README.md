@@ -61,6 +61,8 @@ Apply Merge stays disabled until nothing is left undecided.
   management, world background, cameras and lights
 - **Collections**: which objects belong where, and whether a collection is
   hidden, excluded or set to holdout
+- **Timeline markers**: where each one sits and which camera it binds
+- **Unit settings**: the system, scale and units a scene measures in
 - **Curves, text, empties and the rest**: the settings that shape them, such
   as a curve's bevel and extrude or a text object's contents and spacing
 

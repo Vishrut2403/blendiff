@@ -448,6 +448,26 @@ class BLENDIFF_PT_Results(bpy.types.Panel):
 				sub.label(text=f"        {_format_value(change['old_value'])}  →  {_format_value(change['new_value'])}"
 				)
 
+		# Timeline markers and unit settings. Both describe the scene rather
+		# than anything in it, so they sit beside the scene properties.
+		for key, title, icon in (
+			("marker_changes", "Timeline Markers", "MARKER_HLT"),
+			("unit_changes", "Unit Settings", "DRIVER_DISTANCE"),
+		):
+			entries = diff.get(key, [])
+			if not entries:
+				continue
+			box = layout.box()
+			box.label(text=f"{title} ({len(entries)})", icon=icon)
+			for change in entries:
+				sub = box.column()
+				sub.scale_y = 0.8
+				sub.label(text=f"      {change['property_path']}")
+				sub.label(
+					text=f"        {_format_value(change['old_value'])}  →  {_format_value(change['new_value'])}"
+				)
+
+
 # Value formatting helper  (fixes the material slot dict display bug)
 
 def _wrap(text: str, width: int) -> list[str]:

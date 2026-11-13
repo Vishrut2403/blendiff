@@ -39,6 +39,8 @@ DOMAIN_COLLECTIONS = "collections"
 DOMAIN_RENDER = "render"
 DOMAIN_WORLD = "world"
 DOMAIN_SCENE_CUSTOM_PROPS = "scene_custom_props"
+DOMAIN_MARKERS = "timeline_markers"
+DOMAIN_UNITS = "unit_settings"
 
 # Per-object domains
 DOMAIN_MATERIALS = "material_slots"
@@ -62,6 +64,8 @@ SCENE_DOMAINS = (
 	DOMAIN_RENDER,
 	DOMAIN_WORLD,
 	DOMAIN_SCENE_CUSTOM_PROPS,
+	DOMAIN_MARKERS,
+	DOMAIN_UNITS,
 )
 
 OBJECT_DOMAINS = (

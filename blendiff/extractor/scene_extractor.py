@@ -18,6 +18,10 @@ from .fcurve_extractor import extract_fcurves
 from .driver_extractor import extract_drivers
 from .nla_extractor import extract_nla_tracks
 from .scene_custom_prop_extractor import extract_scene_custom_props
+from .scene_meta_extractor import (
+	extract_timeline_markers,
+	extract_unit_settings,
+)
 from .identity import read_id, stamp_scene
 from ..data_model import schema
 
@@ -118,6 +122,8 @@ class SceneExtractor:
 			"render":          extract_render_settings(scene),
 			"world":           extract_world_data(scene),
 			"scene_custom_props": extract_scene_custom_props(scene),
+			"timeline_markers": extract_timeline_markers(scene),
+			"unit_settings":   extract_unit_settings(scene),
 		}
 
 		# Record which domains this snapshot actually captured, so a future

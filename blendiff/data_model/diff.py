@@ -114,6 +114,12 @@ class SceneDiff:
 	nla_diffs: list = field(default_factory=list)
 	scene_custom_prop_diff: object = None
 
+	# Timeline markers and unit settings. Plain change lists rather than
+	# their own record types: neither has a target to name beyond the scene
+	# itself, so a list of changes says everything there is to say.
+	marker_changes: List[PropertyChange] = field(default_factory=list)
+	unit_changes: List[PropertyChange] = field(default_factory=list)
+
 	# How objects in A were matched to objects in B, as (name_a, name_b) pairs.
 	# The merge engine needs this to key two independent diffs (base→A and
 	# base→B) on the common ancestor's names: without it, an object renamed
@@ -161,6 +167,8 @@ class SceneDiff:
 			or self.driver_diffs
 			or self.nla_diffs
 			or (self.scene_custom_prop_diff and self.scene_custom_prop_diff.changes)
+			or self.marker_changes
+			or self.unit_changes
 		)
 
 	def summary(self) -> dict[str, int]:
@@ -183,5 +191,7 @@ class SceneDiff:
 			"driver_changes":           len(self.driver_diffs),
 			"nla_changes":              len(self.nla_diffs),
 			"scene_custom_prop_changes": scene_cp_count,
+			"marker_changes":           len(self.marker_changes),
+			"unit_changes":             len(self.unit_changes),
 			"skipped_domains":          len(self.skipped_domains),
 		}

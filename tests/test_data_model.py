@@ -26,7 +26,9 @@ class TestSceneDiff:
 			"render_changes": 0, "world_changes": 0, "parent_changes": 0,
 			"constraint_changes": 0, "custom_prop_changes": 0,
 			"fcurve_changes" : 0, "driver_changes": 0, "nla_changes": 0,
-			"scene_custom_prop_changes": 0, "skipped_domains": 0,
+			"scene_custom_prop_changes": 0,
+			"marker_changes": 0, "unit_changes": 0,
+			"skipped_domains": 0,
 		}
 
 	def test_added_objects_property(self):

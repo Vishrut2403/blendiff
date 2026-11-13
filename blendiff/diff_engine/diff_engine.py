@@ -41,6 +41,7 @@ from .nla_diff import diff_all_nla
 from .parent_diff import diff_all_parents
 from .render_diff import diff_render_settings
 from .scene_custom_prop_diff import diff_scene_custom_props
+from .scene_meta_diff import diff_timeline_markers, diff_unit_settings
 from .world_diff import diff_world_data
 
 _DEFAULT_EPSILON = 1e-4
@@ -105,6 +106,17 @@ class DiffEngine:
 			diff.scene_custom_prop_diff = diff_scene_custom_props(
 				scene_a.get("scene_custom_props", {}),
 				scene_b.get("scene_custom_props", {}),
+			)
+
+		if schema.DOMAIN_MARKERS in domains:
+			diff.marker_changes = diff_timeline_markers(
+				scene_a.get("timeline_markers"),
+				scene_b.get("timeline_markers"),
+			)
+		if schema.DOMAIN_UNITS in domains:
+			diff.unit_changes = diff_unit_settings(
+				scene_a.get("unit_settings"),
+				scene_b.get("unit_settings"),
 			)
 
 		pairs = pairing.matched
