@@ -453,6 +453,61 @@ class BLENDIFF_OT_RestoreSnapshot(bpy.types.Operator):
 			return {"CANCELLED"}
 
 
+class BLENDIFF_OT_CompareWithFile(bpy.types.Operator):
+	"""Compare this scene against another .blend file"""
+	bl_idname = "blendiff.compare_with_file"
+	bl_label = "Compare With Another File"
+	bl_description = (
+		"Compare the current scene against a scene in another .blend, "
+		"without opening it"
+	)
+
+	filepath: bpy.props.StringProperty(subtype="FILE_PATH")
+	filter_glob: bpy.props.StringProperty(default="*.blend", options={"HIDDEN"})
+
+	def invoke(self, context, event):
+		context.window_manager.fileselect_add(self)
+		return {"RUNNING_MODAL"}
+
+	def execute(self, context):
+		from ..extractor.foreign import ForeignFileError, extract_scene_from_file
+
+		if not self.filepath:
+			self.report({"ERROR"}, "BlenDiff: No file chosen.")
+			return {"CANCELLED"}
+
+		try:
+			theirs, their_scene = extract_scene_from_file(self.filepath)
+		except ForeignFileError as exc:
+			self.report({"ERROR"}, f"BlenDiff: {exc}")
+			return {"CANCELLED"}
+		except Exception as exc:
+			self.report({"ERROR"}, f"BlenDiff: Could not read that file: {exc}")
+			return {"CANCELLED"}
+
+		try:
+			mine, _ = _extract_current_scene(context)
+			other = os.path.basename(self.filepath)
+
+			# This file first, so a change reads as what the other file would
+			# make it, the same direction as comparing against a snapshot.
+			result = _store_diff(context, mine, theirs, f"this file to {other}")
+
+			wm = context.window_manager
+			wm["blendiff_active_snapshot_id"] = ""
+			wm["blendiff_active_snapshot_label"] = other
+			_refresh_panels(context)
+
+			self.report(
+				{"INFO"},
+				f"BlenDiff [{other}, scene '{their_scene}']: {result['summary']}",
+			)
+			return {"FINISHED"}
+		except Exception as exc:
+			self.report({"ERROR"}, f"BlenDiff: {exc}")
+			return {"CANCELLED"}
+
+
 class BLENDIFF_OT_DeleteSnapshot(bpy.types.Operator):
 	"""Delete a snapshot from the sidecar"""
 	bl_idname = "blendiff.delete_snapshot"
@@ -832,6 +887,7 @@ OPERATORS = [
 	BLENDIFF_OT_SaveSnapshot,
 	BLENDIFF_OT_DiffAgainstSnapshot,
 	BLENDIFF_OT_DiffTwoSnapshots,
+	BLENDIFF_OT_CompareWithFile,
 	BLENDIFF_OT_RestoreSnapshot,
 	BLENDIFF_OT_DeleteSnapshot,
 	BLENDIFF_OT_ExportHTML,

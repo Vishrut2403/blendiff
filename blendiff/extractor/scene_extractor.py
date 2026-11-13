@@ -55,9 +55,31 @@ class SceneExtractor:
 			recover ids for objects that lost theirs because the .blend was
 			closed without saving. See identity.stamp_scene.
 		"""
+		return cls.extract_scene(
+			context.scene,
+			stamp_identity=stamp_identity,
+			known_ids=known_ids,
+			store_geometry=store_geometry,
+		)
+
+	@classmethod
+	def extract_scene(
+		cls,
+		scene: Any,
+		stamp_identity: bool = False,
+		known_ids: dict | None = None,
+		store_geometry: bool = False,
+	) -> dict:
+		"""
+		Extract any scene, not only the active one.
+
+		``extract`` reaches for ``context.scene`` and nothing else, so the
+		work is done here against a scene handed in directly. That is what
+		lets a scene linked from another .blend be read without being made
+		active, which is how one file is compared against another.
+		"""
 		import bpy  # local import keeps module importable outside Blender
 
-		scene = context.scene
 		version = bpy.app.version_string
 
 		if stamp_identity:

@@ -21,6 +21,50 @@
   particular value, because the constant is not the thing that breaks.
 
 ### Added
+- **Compare this file against another .blend.** BlenDiff could only ever
+  compare a file against its own history. The question it could not answer
+  is the one people reach for version control to settle: what is different
+  between my file and the one a colleague just sent me. **Another File >
+  Compare With Another File** answers it.
+
+  The other file is linked rather than opened, and the link is removed
+  afterwards, including when something goes wrong. Nothing is spawned and
+  nothing is left behind: after a comparison the library count is back to
+  zero, the object list is unchanged and the file is not marked modified.
+
+  The obvious approach, running a second Blender in the background and
+  reading back JSON, would have worked and was the wrong thing to ship. An
+  earlier submission was declined for depending on software outside Blender,
+  and the add-on now carries a test forbidding any subprocess. Linking needs
+  neither.
+
+  Objects are matched by name across files, because persistent ids are
+  stamped per file and two unrelated files share none. Where one file is a
+  copy of the other the ids travel with the copy, and renames are tracked
+  across the pair as they are within one file's history.
+
+  Comparing a file with itself, a file that does not exist, or one already
+  linked into the current project is refused. That last one matters:
+  detaching a library somebody linked deliberately would damage their scene.
+
+- **Vertex group weights are compared, group by group.** Vertex groups were
+  recorded as a list of names, so repainting a weight changed nothing a diff
+  could see. For a rigged character that is most of the work.
+
+  Each group now carries a digest of its weights, and a change is reported
+  as `mesh.vertex_groups["Head"].weights`, naming the group rather than
+  saying the mesh changed. The vertex index is hashed alongside the weight,
+  so moving a weight to a different vertex at the same value is still a
+  change: it deforms the mesh differently.
+
+  Hashed rather than stored, for the same reason mesh geometry is. Weights
+  have no bulk read: coordinates come out of `foreach_get` in one call, while
+  every vertex's group memberships have to be walked in Python. Measured on a
+  32k vertex character with 40 groups and 100k assignments, walking cost
+  35 ms and collecting them into lists cost 101 ms, against 23 ms for the
+  entire snapshot as it stood. An object with no vertex groups, which is most
+  of them, skips the walk entirely.
+
 - **Snapshots can store geometry, so a mesh can be put back exactly.** A
   snapshot recorded a digest of each mesh, which answers "did this change"
   and cannot answer "put it back". Tick **Store geometry** when saving one

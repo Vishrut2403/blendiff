@@ -116,6 +116,14 @@ class BLENDIFF_PT_Main(bpy.types.Panel):
 		else:
 			layout.operator("blendiff.save_snapshot", icon="PLUS")
 
+		layout.separator()
+
+		# Comparing against a different .blend entirely, rather than against
+		# this file's own history. Needs a saved file only because the diff
+		# is against the scene on disk beside it.
+		layout.label(text="Another File", icon="FILE_BLEND")
+		layout.operator("blendiff.compare_with_file", icon="ARROW_LEFTRIGHT")
+
 
 # Snapshot History sub-panel
 

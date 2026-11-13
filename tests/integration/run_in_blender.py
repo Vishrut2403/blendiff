@@ -2145,6 +2145,232 @@ def test_a_retopologised_mesh_is_refused_not_mangled():
 	         "the mesh was left exactly as it was")
 
 
+# Vertex group weights
+#
+# Hashed per group rather than stored, because weights have no bulk read and
+# walking them in Python is the expensive part. Needs real bpy: the walk over
+# vertex.groups is exactly what cannot be faked usefully.
+
+def _skinned_sphere(group_names=("Spine", "Head", "Arm_L")):
+	reset_scene()
+	bpy.ops.mesh.primitive_uv_sphere_add(segments=16, ring_count=8)
+	obj = bpy.context.active_object
+	for name in group_names:
+		obj.vertex_groups.new(name=name)
+	for index, group in enumerate(obj.vertex_groups):
+		group.add(list(range(index, len(obj.data.vertices), len(group_names))),
+		          0.5, "REPLACE")
+	return obj
+
+
+@test
+def test_each_vertex_group_is_hashed():
+	obj = _skinned_sphere()
+	weights = extract()["objects"][obj.name]["mesh_data"]["vertex_group_weights"]
+
+	check_eq(sorted(weights), ["Arm_L", "Head", "Spine"], "a digest per group")
+	check_eq(len(set(weights.values())), 3, "the groups hash differently")
+
+
+@test
+def test_an_object_without_vertex_groups_records_none():
+	reset_scene()
+	bpy.ops.mesh.primitive_cube_add()
+	weights = extract()["objects"]["Cube"]["mesh_data"]["vertex_group_weights"]
+	check_eq(weights, {}, "nothing to hash, nothing recorded")
+
+
+@test
+def test_repainting_one_group_reports_only_that_group():
+	obj = _skinned_sphere()
+	before = extract()
+
+	obj.vertex_groups["Head"].add([0, 1, 2], 0.9, "REPLACE")
+	after = extract()
+
+	paths = [
+		c.property_path
+		for o in DiffEngine().compare(before, after).modified_objects
+		for c in o.changes
+	]
+	check_eq(paths, ['mesh.vertex_groups["Head"].weights'], "one group reported")
+
+
+@test
+def test_moving_a_weight_to_another_vertex_is_detected():
+	# The same value on a different vertex deforms differently, so the vertex
+	# index is hashed alongside the weight.
+	obj = _skinned_sphere()
+	before = extract()
+
+	obj.vertex_groups["Spine"].remove([obj.data.vertices[0].index])
+	obj.vertex_groups["Spine"].add([obj.data.vertices[1].index], 0.5, "REPLACE")
+	after = extract()
+
+	paths = [
+		c.property_path
+		for o in DiffEngine().compare(before, after).modified_objects
+		for c in o.changes
+	]
+	check_eq(paths, ['mesh.vertex_groups["Spine"].weights'], "the move was seen")
+
+
+@test
+def test_weights_untouched_produce_no_diff():
+	_skinned_sphere()
+	before = extract()
+	after = extract()
+	check_eq(DiffEngine().compare(before, after).has_changes, False,
+	         "an unchanged skinned mesh is clean")
+
+
+# Comparing against another .blend
+#
+# The other file is linked rather than opened in a second Blender, because
+# spawning a process is the thing an earlier submission was declined for.
+# What has to be proven is that nothing is left behind: a file quietly
+# attached to somebody's project because a diff went wrong is worse than the
+# diff not happening.
+
+def _two_files():
+	"""Write two .blend files that differ in a known way, and open the first."""
+	import tempfile
+
+	folder = tempfile.mkdtemp(prefix="blendiff-f2f-")
+	theirs = os.path.join(folder, "theirs.blend")
+	mine = os.path.join(folder, "mine.blend")
+
+	reset_scene()
+	bpy.ops.mesh.primitive_cube_add()
+	bpy.context.active_object.name = "Hero"
+	bpy.context.active_object.location = (5, 0, 0)
+	bpy.ops.mesh.primitive_uv_sphere_add()
+	bpy.context.active_object.name = "NewProp"
+	bpy.ops.wm.save_as_mainfile(filepath=theirs)
+
+	reset_scene()
+	bpy.ops.mesh.primitive_cube_add()
+	bpy.context.active_object.name = "Hero"
+	bpy.ops.object.camera_add()
+	bpy.context.active_object.name = "MyCamera"
+	bpy.ops.wm.save_as_mainfile(filepath=mine)
+
+	return mine, theirs
+
+
+@test
+def test_another_file_is_compared_without_opening_it():
+	from blendiff.extractor.foreign import extract_scene_from_file
+
+	_mine, theirs = _two_files()
+	before = sorted(bpy.data.objects.keys())
+
+	foreign, scene_name = extract_scene_from_file(theirs)
+
+	check_eq(sorted(foreign["objects"]), ["Hero", "NewProp"], "their objects read")
+	check_eq(bool(scene_name), True, "the scene is named")
+	check_eq(sorted(bpy.data.objects.keys()), before, "my objects untouched")
+
+
+@test
+def test_nothing_is_left_attached_afterwards():
+	from blendiff.extractor.foreign import extract_scene_from_file
+
+	_mine, theirs = _two_files()
+	extract_scene_from_file(theirs)
+
+	check_eq(len(bpy.data.libraries), 0, "no library left behind")
+	check_eq(bpy.data.is_dirty, False, "the file was not marked modified")
+
+
+@test
+def test_the_difference_between_two_files_is_reported():
+	from blendiff.extractor.foreign import extract_scene_from_file
+
+	_mine, theirs = _two_files()
+	foreign, _ = extract_scene_from_file(theirs)
+	diff = DiffEngine().compare(extract(), foreign)
+
+	check_eq([o.name for o in diff.added_objects], ["NewProp"],
+	         "in their file and not mine")
+	check_eq([o.name for o in diff.removed_objects], ["MyCamera"],
+	         "in my file and not theirs")
+	check_eq([o.name for o in diff.modified_objects], ["Hero"],
+	         "in both, and moved")
+
+
+@test
+def test_a_failed_read_still_detaches():
+	"""The link is removed even when extraction goes wrong."""
+	from blendiff.extractor import foreign
+
+	_mine, theirs = _two_files()
+	original = foreign.SceneExtractor.extract_scene
+
+	def explode(*args, **kwargs):
+		raise RuntimeError("pretend extraction failed")
+
+	foreign.SceneExtractor.extract_scene = staticmethod(explode)
+	try:
+		try:
+			foreign.extract_scene_from_file(theirs)
+			check_eq(True, False, "the failure should have propagated")
+		except RuntimeError:
+			pass
+	finally:
+		foreign.SceneExtractor.extract_scene = original
+
+	check_eq(len(bpy.data.libraries), 0, "detached despite the failure")
+
+
+@test
+def test_comparing_a_file_against_itself_is_refused():
+	from blendiff.extractor.foreign import ForeignFileError, extract_scene_from_file
+
+	mine, _theirs = _two_files()
+	bpy.ops.wm.open_mainfile(filepath=mine)
+	try:
+		extract_scene_from_file(mine)
+		check_eq(True, False, "comparing a file with itself was accepted")
+	except ForeignFileError as exc:
+		check_eq("this file" in str(exc), True, str(exc))
+
+
+@test
+def test_a_missing_file_is_refused():
+	from blendiff.extractor.foreign import ForeignFileError, extract_scene_from_file
+
+	try:
+		extract_scene_from_file("/nowhere/at/all.blend")
+		check_eq(True, False, "a missing file was accepted")
+	except ForeignFileError as exc:
+		check_eq("does not exist" in str(exc), True, str(exc))
+
+
+@test
+def test_an_already_linked_file_is_left_alone():
+	"""
+	Detaching a library the user linked on purpose would damage their scene,
+	so BlenDiff refuses rather than attach and detach it.
+	"""
+	from blendiff.extractor.foreign import ForeignFileError, extract_scene_from_file
+
+	_mine, theirs = _two_files()
+	with bpy.data.libraries.load(theirs, link=True) as (source, target):
+		target.objects = list(source.objects)[:1]
+
+	try:
+		try:
+			extract_scene_from_file(theirs)
+			check_eq(True, False, "an already-linked file was attached again")
+		except ForeignFileError as exc:
+			check_eq("already linked" in str(exc), True, str(exc))
+		check_eq(len(bpy.data.libraries), 1, "their link is still there")
+	finally:
+		for library in list(bpy.data.libraries):
+			bpy.data.libraries.remove(library)
+
+
 def main() -> int:
 	passed, failed = 0, []
 

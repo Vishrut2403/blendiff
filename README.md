@@ -54,6 +54,8 @@ Apply Merge stays disabled until nothing is left undecided.
   by the name you see in the panel rather than an internal socket number
 - **Shape keys**: each key's value, mute, slider range and interpolation, plus
   whether the shape itself was sculpted
+- **Vertex weights**: which group's weights were repainted, named group by
+  group
 - **Animation**: keyframe counts, frame ranges, interpolation, drivers and NLA tracks
 - **Scene settings**: render engine, resolution, sampling, output format, colour
   management, world background, cameras and lights
@@ -110,6 +112,10 @@ for the **BlenDiff** tab.
    made since the snapshot is left alone.
 7. **Export HTML Report** writes a single self contained page you can send to
    someone who does not have the file open.
+
+To compare against a different `.blend` entirely, rather than against this
+file's history, use **Another File > Compare With Another File** and pick it.
+The other file is read without being opened and is not attached to yours.
 
 For a merge, take a snapshot of the common starting point, then one of each
 version that grew from it, and pick all three in the **Three-Way Merge** panel.

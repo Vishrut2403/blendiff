@@ -104,6 +104,35 @@ def _diff_shape_keys(
 	return changes
 
 
+
+def _diff_vertex_group_weights(
+	weights_a: dict | None,
+	weights_b: dict | None,
+	prefix: str,
+) -> list[PropertyChange]:
+	"""
+	Compare weight digests group by group, keyed by name.
+
+	A group that exists on only one side is a group added or removed, which
+	the vertex_groups name list already reports, so it is not repeated here.
+	"""
+	changes: list[PropertyChange] = []
+	first = weights_a if isinstance(weights_a, dict) else {}
+	second = weights_b if isinstance(weights_b, dict) else {}
+
+	for name in sorted(set(first) & set(second)):
+		digest_a, digest_b = first[name], second[name]
+		if not _hashes_comparable(digest_a, digest_b):
+			continue
+		if digest_a != digest_b:
+			changes.append(PropertyChange(
+				property_path=f'{prefix}.vertex_groups["{escape_name(name)}"].weights',
+				old_value=digest_a,
+				new_value=digest_b,
+			))
+	return changes
+
+
 def diff_mesh_data(
 	mesh_a: dict | None,
 	mesh_b: dict | None,
@@ -139,7 +168,16 @@ def diff_mesh_data(
 		val_b = mesh_b.get(key)
 		path = f"{prefix}.{key}"
 
-		if key == "stored_geometry":
+		if key == "vertex_group_weights":
+			# Compared per group, so a report names which group's weights
+			# moved rather than saying the mesh changed. Only when both sides
+			# recorded it: a snapshot from before weights were hashed has no
+			# opinion about them.
+			if key not in mesh_a or key not in mesh_b:
+				continue
+			changes.extend(_diff_vertex_group_weights(val_a, val_b, prefix))
+
+		elif key == "stored_geometry":
 			# Not "vertex_positions": that name is already taken by the
 			# display name of the vertex digest just below, and an applier
 			# matching it was handed a hash to decode.
