@@ -20,6 +20,17 @@
   by hand and read them, rather than asserting that a constant has a
   particular value, because the constant is not the thing that breaks.
 
+### Fixed
+- **Comparing against another file reported a visibility change on every
+  object.** `visible_get()` answers for the *active* view layer. An object in
+  a scene linked from another .blend is not in it, and the call returns False
+  rather than raising, so every object in a compared file looked hidden. On a
+  real scene that is one invented change per object, enough to bury the real
+  ones.
+
+  The field is now left out when it cannot be known, so it compares as "not
+  captured" rather than as a value nobody set.
+
 ### Added
 - **Compare this file against another .blend.** BlenDiff could only ever
   compare a file against its own history. The question it could not answer

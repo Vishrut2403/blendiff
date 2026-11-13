@@ -90,6 +90,16 @@ class SceneExtractor:
 			except Exception as exc:
 				log.warning("Could not stamp object identities: %s", exc)
 
+		# Whether "visible in the view layer" means anything for this scene.
+		#
+		# visible_get() answers for the *active* view layer. An object in a
+		# scene linked from another .blend is not in it, and the call returns
+		# False rather than raising, so every object in a compared file looked
+		# hidden and every comparison reported a visibility change nobody made.
+		# For such a scene the answer is unknown, and unknown is recorded by
+		# leaving the field out.
+		in_active_scene = cls._is_active_scene(scene)
+
 		collections = cls._extract_collection_tree(scene.collection)
 		# Objects record their collection membership as full paths, so the
 		# tree must be walked before objects are extracted.
@@ -99,7 +109,10 @@ class SceneExtractor:
 			"blender_version": version,
 			"scene_name":      scene.name,
 			"objects":         cls._extract_all_objects(
-				scene, path_lookup, store_geometry=store_geometry,
+				scene,
+				path_lookup,
+				store_geometry=store_geometry,
+				view_layer_known=in_active_scene,
 			),
 			"collections":     collections,
 			"render":          extract_render_settings(scene),
@@ -131,13 +144,17 @@ class SceneExtractor:
 		scene: Any,
 		path_lookup: dict[str, list[str]] | None = None,
 		store_geometry: bool = False,
+		view_layer_known: bool = True,
 	) -> dict[str, dict]:
 		"""Return a dict keyed by object name."""
 		result: dict[str, dict] = {}
 		for obj in scene.objects:
 			try:
 				data = cls._extract_object(
-					obj, path_lookup or {}, store_geometry=store_geometry,
+					obj,
+					path_lookup or {},
+					store_geometry=store_geometry,
+					view_layer_known=view_layer_known,
 				)
 				result[obj.name] = data
 			except Exception as exc:
@@ -150,6 +167,7 @@ class SceneExtractor:
 		obj: Any,
 		path_lookup: dict[str, list[str]],
 		store_geometry: bool = False,
+		view_layer_known: bool = True,
 	) -> dict:
 		"""Extract a single bpy.types.Object."""
 		obj_type = obj.type
@@ -177,7 +195,6 @@ class SceneExtractor:
 			# object hidden in one but not the other is a common source of
 			# "why is it missing from the render?" — so both are tracked.
 			"hide_render":     bool(getattr(obj, "hide_render", False)),
-			"visible_in_viewlayer": cls._visible_in_viewlayer(obj),
 			**cls._extract_visibility_flags(obj),
 			"parent":          None,
 			"camera_data":     None,
@@ -193,6 +210,11 @@ class SceneExtractor:
 			"drivers":         [],
 			"nla_tracks":      [],
 		}
+
+		# Left out entirely when it cannot be known, so it compares as "not
+		# captured" rather than as a value nobody set.
+		if view_layer_known:
+			data["visible_in_viewlayer"] = cls._visible_in_viewlayer(obj)
 
 		# Modifiers exist on all object types
 		try:
@@ -308,6 +330,16 @@ class SceneExtractor:
 			transform["rotation_axis_angle"] = tuple(obj.rotation_axis_angle)
 
 		return transform
+
+	@staticmethod
+	def _is_active_scene(scene: Any) -> bool:
+		"""True when this is the scene the current view layer belongs to."""
+		try:
+			import bpy
+
+			return scene is bpy.context.scene
+		except Exception:
+			return False
 
 	@classmethod
 	def _visible_in_viewlayer(cls, obj: Any) -> bool | None:

@@ -2371,6 +2371,35 @@ def test_an_already_linked_file_is_left_alone():
 			bpy.data.libraries.remove(library)
 
 
+@test
+def test_a_compared_file_reports_no_phantom_visibility_change():
+	"""
+	visible_get() answers for the *active* view layer.
+
+	An object in a scene linked from another .blend is not in it, and the
+	call returns False rather than raising, so every object in a compared
+	file looked hidden and every comparison invented a visibility change. On
+	a real scene that is one phantom change per object, enough to bury the
+	real ones.
+	"""
+	from blendiff.extractor.foreign import extract_scene_from_file
+
+	_mine, theirs = _two_files()
+	foreign, _ = extract_scene_from_file(theirs)
+
+	check_eq("visible_in_viewlayer" in foreign["objects"]["Hero"], False,
+	         "the field is left out when it cannot be known")
+	check_eq("visible_in_viewlayer" in extract()["objects"]["Hero"], True,
+	         "and is still recorded for the scene we are in")
+
+	paths = [
+		c.property_path
+		for o in DiffEngine().compare(extract(), foreign).modified_objects
+		for c in o.changes
+	]
+	check_eq(paths, ["transform.location"], "only the real change is reported")
+
+
 def main() -> int:
 	passed, failed = 0, []
 
