@@ -85,6 +85,31 @@ def _priority(property_path: str) -> int:
 	return _DEFAULT_PRIORITY
 
 
+def _scene_priority(property_path: str) -> int:
+	"""
+	Order in which a scene setting should be written, lowest first.
+
+	The unit system comes before every other unit setting, because the rest
+	are only valid within it: writing length_unit of FEET while the scene is
+	still metric raises, and the paths happen to sort the wrong way round.
+
+	The output format comes before the colour depth and mode, because Blender
+	resets both when the format changes: EXR switches to 32-bit float and JPEG
+	back to 8-bit RGB. Written the other way round, the merge would apply a
+	depth and then have the format throw it away, reporting success for a
+	value that is no longer there.
+
+	A marker has to exist before its frame or camera can be set, and the
+	existence paths already sort before the field paths, so those need no
+	saying here.
+	"""
+	if property_path in ("units.system", "units.system_rotation"):
+		return 0
+	if property_path == "render.file_format":
+		return 1
+	return _DEFAULT_PRIORITY
+
+
 @dataclass
 class ChangeOutcome:
 	"""One property write and what became of it."""
@@ -201,15 +226,55 @@ class Applier:
 			self._apply_object_proposal(proposal, context, result)
 			return
 
-		# Collection and scene targets are reported rather than written:
-		# rebuilding a collection hierarchy or rewriting scene settings from a
-		# summary risks more than it fixes, and the user is told plainly.
+		if proposal.target_kind == TargetKind.SCENE:
+			self._apply_scene_proposal(proposal, context, result)
+			return
+
+		# Collection targets are reported rather than written: rebuilding a
+		# hierarchy from a summary of its contents risks more than it fixes,
+		# and the user is told plainly.
 		for path, _ in self._pending_changes(proposal):
 			result.skipped.append(ChangeOutcome(
 				proposal.object_name,
 				path,
 				f"{proposal.target_kind.value} changes must be applied manually",
 			))
+
+	def _apply_scene_proposal(
+		self,
+		proposal: MergeProposal,
+		context: Any,
+		result: ApplyResult,
+	) -> None:
+		"""
+		Write scene-wide settings: render, units, markers, world, custom props.
+
+		Scene paths are stored without a prefix, because that is how the diff
+		reports them, while the appliers are registered under "scene." so that
+		`resolution_x` on a scene can never be confused with a property of an
+		object. The merge engine already prefixes the same way when asking
+		whether a change is applicable, so this keeps one spelling throughout.
+		"""
+		name = proposal.object_name
+		changes = sorted(
+			(
+				(path, value) for path, value in self._pending_changes(proposal)
+				if path not in (PATH_STRUCTURAL, PATH_EXISTENCE, PATH_ADD_ADD)
+			),
+			key=lambda item: _scene_priority(item[0]),
+		)
+
+		for path, value in changes:
+			lookup = path if path.startswith("scene.") else f"scene.{path}"
+			if find_applier(lookup) is None:
+				result.skipped.append(ChangeOutcome(name, path, unsupported_reason(lookup)))
+				continue
+			try:
+				apply_property(None, lookup, value, context)
+				result.applied.append(ChangeOutcome(name, path))
+			except Exception as exc:
+				log.warning("Failed to apply %r on the scene: %s", path, exc)
+				result.failed.append(ChangeOutcome(name, path, str(exc)))
 
 	def _apply_object_proposal(
 		self,

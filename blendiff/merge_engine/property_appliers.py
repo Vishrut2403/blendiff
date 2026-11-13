@@ -1152,6 +1152,302 @@ def _apply_driver(obj: Any, path: str, value: Any, context: Any) -> None:
 	driver.type = str(value)
 
 
+# Scene-level settings
+#
+# Render settings, units, markers, the world and the scene's own custom
+# properties. These were diffed from early on, built into a merge proposal,
+# and then skipped at apply time with "scene changes must be applied
+# manually" — so two people bumping the sample count or changing the output
+# path were shown the collision and left to fix it by hand. Almost all of it
+# is a single assignment somewhere under the scene.
+#
+# Scene paths arrive with a "scene." prefix. The merge engine already uses
+# that prefix when asking whether a scene change is applicable, so writing
+# the entries this way means can_apply and the writers agree on one spelling
+# rather than two.
+
+#: Render snapshot key -> dotted path from the scene it lives at.
+#
+# The snapshot flattens several structs into one dict, so this map is the way
+# back. It mirrors render_extractor.py and has to be kept in step with it.
+SCENE_RENDER_TARGETS: dict[str, str] = {
+	"engine": "render.engine",
+	"resolution_x": "render.resolution_x",
+	"resolution_y": "render.resolution_y",
+	"resolution_percentage": "render.resolution_percentage",
+	"filepath": "render.filepath",
+	"file_format": "render.image_settings.file_format",
+	"color_mode": "render.image_settings.color_mode",
+	"color_depth": "render.image_settings.color_depth",
+	"frame_start": "frame_start",
+	"frame_end": "frame_end",
+	"frame_step": "frame_step",
+	"fps": "render.fps",
+	"fps_base": "render.fps_base",
+	"display_device": "display_settings.display_device",
+	"view_transform": "view_settings.view_transform",
+	"look": "view_settings.look",
+	"exposure": "view_settings.exposure",
+	"gamma": "view_settings.gamma",
+}
+
+#: World snapshot key -> dotted path from the world datablock.
+SCENE_WORLD_TARGETS: dict[str, str] = {
+	"color": "color",
+	"ao_factor": "light_settings.ao_factor",
+	"ao_distance": "light_settings.distance",
+}
+
+#: use_ao is spelled differently across versions, so it is tried by name.
+_WORLD_AO_NAMES = ("use_ambient_occlusion", "use_ao")
+
+# The render snapshot is one flat dict under "render", so its paths read
+# scene.render.resolution_x even for frame_end, which lives on the scene
+# itself. The target map above is what untangles that.
+_SCENE_RENDER_PROP = re.compile(
+	r"^scene\.render\.("
+	+ "|".join(re.escape(key) for key in SCENE_RENDER_TARGETS)
+	+ r")$"
+)
+
+_SCENE_ENGINE_PROP = re.compile(r"^scene\.render\.(cycles|eevee)\.(\w+)$")
+
+_SCENE_UNIT_PROP = re.compile(r"^scene\.units\.(\w+)$")
+
+_SCENE_MARKER = re.compile(r'^scene\.markers\["' + QUOTED_NAME + r'"\]$')
+
+_SCENE_MARKER_FIELD = re.compile(
+	r'^scene\.markers\["' + QUOTED_NAME + r'"\]\.(frame|camera)$'
+)
+
+_SCENE_CUSTOM_PROP = re.compile(r"^scene\.custom_props\.[^.]+$")
+
+_SCENE_WORLD_PROP = re.compile(
+	r"^scene\.world\.(" + "|".join(SCENE_WORLD_TARGETS) + r"|use_ao)$"
+)
+
+_SCENE_WORLD_BACKGROUND = re.compile(
+	r"^scene\.world\.(background_color|background_strength)$"
+)
+
+
+def _scene_of(context: Any) -> Any:
+	"""The scene being merged into."""
+	import bpy
+
+	scene = getattr(context, "scene", None) or bpy.context.scene
+	if scene is None:
+		raise ValueError("There is no active scene to write to.")
+	return scene
+
+
+def _apply_scene_render(obj: Any, path: str, value: Any, context: Any) -> None:
+	"""Write one render or colour-management setting."""
+	match = _SCENE_RENDER_PROP.match(path)
+	if match is None:
+		raise ValueError(f"Unsupported scene property {path!r}")
+	_set_nested(_scene_of(context), SCENE_RENDER_TARGETS[match.group(1)], value)
+
+
+def _apply_scene_engine(obj: Any, path: str, value: Any, context: Any) -> None:
+	"""
+	Write one Cycles or EEVEE setting.
+
+	Both are checked rather than assumed: Cycles can be disabled as an
+	add-on, and EEVEE's settings were rewritten in 4.2, so a file snapshotted
+	on an older Blender carries keys this one has never heard of. Writing to a
+	missing struct or attribute would raise an unhelpful AttributeError from
+	deep inside the applier instead of saying which setting is not here.
+	"""
+	import bpy
+
+	match = _SCENE_ENGINE_PROP.match(path)
+	if match is None:
+		raise ValueError(f"Unsupported scene property {path!r}")
+
+	engine, key = match.group(1), match.group(2)
+	settings = getattr(_scene_of(context), engine, None)
+	if settings is None:
+		raise ValueError(
+			f"This Blender has no {engine} settings, so {key!r} cannot be set."
+		)
+	if not hasattr(settings, key):
+		raise ValueError(
+			f"{engine}.{key} does not exist in Blender "
+			f"{bpy.app.version_string}; the snapshot came from a version that "
+			f"had it."
+		)
+	setattr(settings, key, value)
+
+
+def _apply_scene_units(obj: Any, path: str, value: Any, context: Any) -> None:
+	"""Write one unit setting."""
+	import bpy
+
+	match = _SCENE_UNIT_PROP.match(path)
+	if match is None:
+		raise ValueError(f"Unsupported scene property {path!r}")
+
+	attr = match.group(1)
+	units = _scene_of(context).unit_settings
+	if not hasattr(units, attr):
+		raise ValueError(
+			f"Unit setting {attr!r} does not exist in Blender "
+			f"{bpy.app.version_string}."
+		)
+	setattr(units, attr, value)
+
+
+def _apply_scene_marker(obj: Any, path: str, value: Any, context: Any) -> None:
+	"""
+	Add, move or remove one timeline marker.
+
+	Unlike an object, a marker is fully described by what the snapshot holds:
+	a name and a frame. There is nothing to guess, so creating one is a real
+	merge rather than a fabrication, which is why this is the one structural
+	change BlenDiff does apply.
+	"""
+	match = _SCENE_MARKER.match(path)
+	if match is None:
+		raise ValueError(f"Unsupported scene property {path!r}")
+
+	name = unescape_name(match.group(1))
+	scene = _scene_of(context)
+	existing = scene.timeline_markers.get(name)
+
+	if value is None:
+		if existing is not None:
+			scene.timeline_markers.remove(existing)
+		return
+
+	if existing is not None:
+		existing.frame = int(value)
+		return
+	scene.timeline_markers.new(name, frame=int(value))
+
+
+def _apply_scene_marker_field(obj: Any, path: str, value: Any, context: Any) -> None:
+	"""Move a marker, or change which camera it binds."""
+	match = _SCENE_MARKER_FIELD.match(path)
+	if match is None:
+		raise ValueError(f"Unsupported scene property {path!r}")
+
+	name = unescape_name(match.group(1))
+	field = match.group(2)
+	scene = _scene_of(context)
+
+	marker = scene.timeline_markers.get(name)
+	if marker is None:
+		raise ValueError(
+			f"This scene has no marker named {name!r}; it was removed since "
+			f"the snapshot."
+		)
+
+	if field == "frame":
+		marker.frame = int(value)
+		return
+
+	if value is None:
+		marker.camera = None
+		return
+
+	camera = scene_object(context, str(value))
+	if camera is None:
+		raise ValueError(
+			f"Marker {name!r} binds camera {value!r}, which is not in this "
+			f"scene."
+		)
+	marker.camera = camera
+
+
+def _apply_scene_custom_prop(obj: Any, path: str, value: Any, context: Any) -> None:
+	"""Set or delete one of the scene's own custom properties."""
+	key = path.split(".", 2)[2]
+	scene = _scene_of(context)
+
+	if value is None:
+		if key in scene:
+			del scene[key]
+		return
+	scene[key] = value
+
+
+def _world_of(context: Any) -> Any:
+	world = _scene_of(context).world
+	if world is None:
+		raise ValueError(
+			"This scene has no world, so there are no world settings to write."
+		)
+	return world
+
+
+def _apply_scene_world(obj: Any, path: str, value: Any, context: Any) -> None:
+	"""Write one plain world setting."""
+	match = _SCENE_WORLD_PROP.match(path)
+	if match is None:
+		raise ValueError(f"Unsupported scene property {path!r}")
+
+	key = match.group(1)
+	world = _world_of(context)
+
+	if key == "use_ao":
+		for name in _WORLD_AO_NAMES:
+			if hasattr(world.light_settings, name):
+				setattr(world.light_settings, name, bool(value))
+				return
+		raise ValueError(
+			"This Blender's world has no ambient occlusion toggle under either "
+			"name BlenDiff knows."
+		)
+
+	_set_nested(world, SCENE_WORLD_TARGETS[key], value)
+
+
+def _apply_scene_world_background(obj: Any, path: str, value: Any, context: Any) -> None:
+	"""
+	Write the Background node's colour or strength.
+
+	The snapshot flattens these out of the world's node tree because they are
+	what people mean by "the sky", so writing them back means going into that
+	tree. Anything beyond the one Background node, an HDRI image or a rewired
+	graph, stays out for the same reason a material's does.
+	"""
+	match = _SCENE_WORLD_BACKGROUND.match(path)
+	if match is None:
+		raise ValueError(f"Unsupported scene property {path!r}")
+
+	key = match.group(1)
+	world = _world_of(context)
+	if not world.use_nodes or world.node_tree is None:
+		raise ValueError(
+			"This world uses a flat colour rather than nodes; set world.color "
+			"instead."
+		)
+
+	node = next((n for n in world.node_tree.nodes if n.type == "BACKGROUND"), None)
+	if node is None:
+		raise ValueError(
+			"This world's node tree has no Background node, so there is "
+			"nothing to write this to."
+		)
+
+	socket_name = "Color" if key == "background_color" else "Strength"
+	socket = node.inputs.get(socket_name)
+	if socket is None:
+		raise ValueError(f"The Background node has no {socket_name!r} input.")
+	if socket.is_linked:
+		raise ValueError(
+			f"The Background node's {socket_name!r} comes from another node, "
+			f"an HDRI for instance, so writing a value would change nothing."
+		)
+	if value is None:
+		raise ValueError(
+			f"The snapshot recorded no {socket_name!r}, so there is nothing to "
+			f"write."
+		)
+	socket.default_value = _socket_value(socket, value)
+
+
 # Registry
 #
 # Order matters only in that the first match wins; patterns are disjoint.
@@ -1202,6 +1498,14 @@ REGISTRY: tuple[ApplierEntry, ...] = (
 	ApplierEntry(_MATERIAL_NODE_INPUT, _apply_material_node_input, "Material node input"),
 	ApplierEntry(_MATERIAL_NODE_IMAGE, _apply_material_node_image, "Texture node image"),
 	ApplierEntry(_DRIVER_PROP, _apply_driver, "Driver setting"),
+	ApplierEntry(_SCENE_RENDER_PROP, _apply_scene_render, "Render setting"),
+	ApplierEntry(_SCENE_ENGINE_PROP, _apply_scene_engine, "Render engine setting"),
+	ApplierEntry(_SCENE_UNIT_PROP, _apply_scene_units, "Unit setting"),
+	ApplierEntry(_SCENE_MARKER_FIELD, _apply_scene_marker_field, "Timeline marker"),
+	ApplierEntry(_SCENE_MARKER, _apply_scene_marker, "Timeline marker"),
+	ApplierEntry(_SCENE_CUSTOM_PROP, _apply_scene_custom_prop, "Scene custom property"),
+	ApplierEntry(_SCENE_WORLD_BACKGROUND, _apply_scene_world_background, "World background"),
+	ApplierEntry(_SCENE_WORLD_PROP, _apply_scene_world, "World setting"),
 )
 
 
@@ -1274,8 +1578,17 @@ UNSUPPORTED_REASONS: tuple[tuple[re.Pattern, str], ...] = (
 	 "material."),
 	(re.compile(r"^materials?[\[.]"),
 	 "This material change must be made by hand."),
+	(re.compile(r"^scene\.world\.(hdri_filepath|hdri_strength)$"),
+	 "An HDRI is an image datablock and a node to feed it; load it and plug "
+	 "it in by hand."),
+	(re.compile(r"^scene\.world\.use_nodes$"),
+	 "Turning world nodes on or off replaces the whole graph; toggle it in "
+	 "the world settings."),
+	(re.compile(r"^scene\.world(\.name)?$"),
+	 "Assigning a different world to the scene is not applicable; pick it in "
+	 "the world settings."),
 	(re.compile(r"^scene\."),
-	 "Scene-level settings are applied separately from object merges."),
+	 "This scene setting must be changed by hand."),
 	(re.compile(r"^__add_add__$"),
 	 "Both sides added an object with this name; BlenDiff cannot create objects."),
 )

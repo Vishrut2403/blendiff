@@ -2719,6 +2719,220 @@ def test_driver_variables_are_reported_not_applied():
 			         "and says where to set it")
 
 
+# Scene-wide settings
+#
+# Needs real bpy: the snapshot flattens render.image_settings,
+# view_settings and the engine structs into one dict, so what these prove is
+# that each value finds its way back to the struct it actually lives on. A
+# wrong target is a silent no-op against a fake and an AttributeError here.
+
+@test
+def test_render_settings_merge_back():
+	from blendiff.data_model.conflict import Resolution
+	from blendiff.merge_engine.applier import Applier
+	from blendiff.merge_engine.merge_engine import MergeEngine
+
+	reset_scene()
+	scene = bpy.context.scene
+	scene.render.resolution_x = 1920
+	scene.render.image_settings.file_format = "PNG"
+	scene.frame_end = 250
+	base = extract()
+
+	scene.render.resolution_x = 3840
+	scene.render.image_settings.file_format = "OPEN_EXR"
+	scene.frame_end = 500
+	version_a = extract()
+
+	scene.render.resolution_x = 2560
+	scene.render.image_settings.file_format = "JPEG"
+	scene.frame_end = 100
+	version_b = extract()
+
+	three_way = MergeEngine().three_way_diff(
+		base=base, version_a=version_a, version_b=version_b,
+		base_label="base", label_a="A", label_b="B",
+	)
+	conflicts = [c for p in three_way.proposals for c in p.conflicts]
+	check_eq(len(conflicts) >= 3, True, "the three edits conflict")
+	check_eq([c.property_path for c in conflicts if not c.applicable], [],
+	         "and every one of them is applicable")
+	for conflict in conflicts:
+		conflict.resolution = Resolution.USE_A
+
+	result = Applier().apply_all(three_way, bpy.context)
+	check_eq(result.failed, [], "nothing failed to apply")
+	check_eq(scene.render.resolution_x, 3840, "resolution taken from A")
+	check_eq(scene.render.image_settings.file_format, "OPEN_EXR",
+	         "and the format, which lives two structs down")
+	check_eq(scene.frame_end, 500, "and the frame range, which is on the scene")
+
+	# Blender resets the colour depth when the format changes: EXR means
+	# 32-bit float. A's depth has to survive, which it only does because the
+	# format is written first.
+	check_eq(scene.render.image_settings.color_depth, "32",
+	         "the colour depth A's format implies was not clobbered")
+
+
+@test
+def test_an_engine_setting_merges_back():
+	from blendiff.merge_engine.property_appliers import apply_property
+
+	reset_scene()
+	scene = bpy.context.scene
+	scene.render.engine = "CYCLES"
+	before = extract()
+	scene.cycles.samples = 512
+	after = extract()
+
+	diff = DiffEngine().compare(before, after)
+	paths = [c.property_path for c in diff.render_diff.changes]
+	check_eq("render.cycles.samples" in paths, True, "the sample count is diffed")
+
+	apply_property(None, "scene.render.cycles.samples", 64, bpy.context)
+	check_eq(scene.cycles.samples, 64, "and written back")
+
+
+@test
+def test_unit_settings_merge_back_system_first():
+	"""length_unit is only valid within a system, and sorts before it."""
+	from blendiff.data_model.conflict import Resolution
+	from blendiff.merge_engine.applier import Applier
+	from blendiff.merge_engine.merge_engine import MergeEngine
+
+	reset_scene()
+	scene = bpy.context.scene
+	scene.unit_settings.system = "METRIC"
+	scene.unit_settings.length_unit = "METERS"
+	base = extract()
+
+	scene.unit_settings.system = "IMPERIAL"
+	scene.unit_settings.length_unit = "FEET"
+	version_a = extract()
+
+	scene.unit_settings.system = "METRIC"
+	scene.unit_settings.length_unit = "CENTIMETERS"
+	version_b = extract()
+
+	three_way = MergeEngine().three_way_diff(
+		base=base, version_a=version_a, version_b=version_b,
+		base_label="base", label_a="A", label_b="B",
+	)
+	for proposal in three_way.proposals:
+		for conflict in proposal.conflicts:
+			conflict.resolution = Resolution.USE_A
+
+	result = Applier().apply_all(three_way, bpy.context)
+	check_eq(result.failed, [], "nothing failed to apply")
+	check_eq(scene.unit_settings.system, "IMPERIAL", "system taken from A")
+	check_eq(scene.unit_settings.length_unit, "FEET",
+	         "and the unit, which is only valid once the system is set")
+
+
+@test
+def test_markers_merge_back_including_a_new_one():
+	from blendiff.data_model.conflict import Resolution
+	from blendiff.merge_engine.applier import Applier
+	from blendiff.merge_engine.merge_engine import MergeEngine
+
+	reset_scene()
+	scene = bpy.context.scene
+	bpy.ops.object.camera_add()
+	camera = bpy.context.view_layer.objects.active
+	scene.timeline_markers.new("shot_010", frame=24)
+	scene.timeline_markers.new("shot_020", frame=72)
+	base = extract()
+
+	scene.timeline_markers["shot_010"].frame = 36
+	scene.timeline_markers["shot_010"].camera = camera
+	scene.timeline_markers.new("shot_030", frame=120)
+	version_a = extract()
+
+	scene.timeline_markers["shot_010"].frame = 48
+	scene.timeline_markers["shot_010"].camera = None
+	marker = scene.timeline_markers.get("shot_030")
+	if marker is not None:
+		scene.timeline_markers.remove(marker)
+	version_b = extract()
+
+	three_way = MergeEngine().three_way_diff(
+		base=base, version_a=version_a, version_b=version_b,
+		base_label="base", label_a="A", label_b="B",
+	)
+	conflicts = [c for p in three_way.proposals for c in p.conflicts]
+	check_eq([c.property_path for c in conflicts if not c.applicable], [],
+	         "every marker conflict is applicable")
+	for conflict in conflicts:
+		conflict.resolution = Resolution.USE_A
+
+	result = Applier().apply_all(three_way, bpy.context)
+	check_eq(result.failed, [], "nothing failed to apply")
+	check_eq(scene.timeline_markers["shot_010"].frame, 36, "the move from A")
+	check_eq(scene.timeline_markers["shot_010"].camera.name, camera.name,
+	         "the camera binding from A")
+	check_eq(scene.timeline_markers.get("shot_030") is not None, True,
+	         "and the marker A added was created")
+	check_eq(scene.timeline_markers.get("shot_030").frame, 120,
+	         "at the frame A recorded")
+
+
+@test
+def test_the_worlds_background_merges_back():
+	from blendiff.merge_engine.property_appliers import apply_property
+
+	reset_scene()
+	scene = bpy.context.scene
+	world = bpy.data.worlds.new("World")
+	world.use_nodes = True
+	scene.world = world
+	background = next(n for n in world.node_tree.nodes if n.type == "BACKGROUND")
+	background.inputs["Strength"].default_value = 1.0
+	before = extract()
+
+	background.inputs["Strength"].default_value = 3.0
+	after = extract()
+
+	diff = DiffEngine().compare(before, after)
+	paths = [c.property_path for c in diff.world_diff.changes]
+	check_eq("world.background_strength" in paths, True, "the strength is diffed")
+
+	apply_property(None, "scene.world.background_strength", 1.0, bpy.context)
+	check_eq(round(background.inputs["Strength"].default_value, 3), 1.0,
+	         "and written back into the node tree")
+
+	# An HDRI feeds the Color socket, so a flat colour must be refused.
+	texture = world.node_tree.nodes.new("ShaderNodeTexEnvironment")
+	world.node_tree.links.new(texture.outputs["Color"], background.inputs["Color"])
+	try:
+		apply_property(None, "scene.world.background_color",
+		               [1.0, 0.0, 0.0, 1.0], bpy.context)
+		check_eq(True, False, "writing an HDRI-fed colour should be refused")
+	except ValueError as exc:
+		check_eq("comes from another node" in str(exc), True, "and says why")
+
+
+@test
+def test_scene_custom_properties_merge_back():
+	from blendiff.merge_engine.property_appliers import apply_property
+
+	reset_scene()
+	scene = bpy.context.scene
+	scene["shot"] = "010"
+	before = extract()
+	scene["shot"] = "020"
+	after = extract()
+
+	diff = DiffEngine().compare(before, after)
+	paths = [c.property_path for c in diff.scene_custom_prop_diff.changes]
+	check_eq(paths, ["scene.custom_props.shot"], "the property is diffed")
+
+	apply_property(None, "scene.custom_props.shot", "010", bpy.context)
+	check_eq(scene["shot"], "010", "and written back")
+
+	apply_property(None, "scene.custom_props.shot", None, bpy.context)
+	check_eq("shot" in scene.keys(), False, "and removed when the winner had none")
+
+
 def main() -> int:
 	passed, failed = 0, []
 

@@ -464,11 +464,22 @@ class MergeEngine:
 
 	@staticmethod
 	def _scene_changes(diff: SceneDiff) -> list[PropertyChange]:
+		"""
+		Every scene-wide change a merge has to account for.
+
+		Each domain has to be listed here explicitly, and a domain added to
+		the diff and forgotten here is invisible to the merge: two people
+		moving the same marker would merge "cleanly" and one edit would be
+		lost without a word. Markers and units were added to the diff first
+		and arrived here second, which is exactly that gap.
+		"""
 		changes: list[PropertyChange] = []
 		changes.extend(diff.render_diff.changes)
 		changes.extend(diff.world_diff.changes)
 		if diff.scene_custom_prop_diff is not None:
 			changes.extend(diff.scene_custom_prop_diff.changes)
+		changes.extend(diff.marker_changes)
+		changes.extend(diff.unit_changes)
 		return changes
 
 	# Shared change-set merging

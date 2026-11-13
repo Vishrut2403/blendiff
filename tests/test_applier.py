@@ -471,13 +471,22 @@ class TestNonObjectTargets:
 		assert result.applied == []
 		assert "manually" in result.skipped[0].detail
 
-	def test_scene_changes_are_reported_not_applied(self, bpy):
+	def test_a_scene_setting_is_applied(self, bpy):
 		proposal = _proposal(
-			"Scene", [("cycles.samples", 256)], target_kind=TargetKind.SCENE,
+			"Scene", [("render.cycles.samples", 256)], target_kind=TargetKind.SCENE,
+		)
+		result = _apply(proposal)
+		assert result.failed == []
+		assert bpy.context.scene.cycles.samples == 256
+
+	def test_an_unapplicable_scene_setting_says_why(self, bpy):
+		proposal = _proposal(
+			"Scene", [("world.hdri_filepath", "//sky.exr")],
+			target_kind=TargetKind.SCENE,
 		)
 		result = _apply(proposal)
 		assert result.applied == []
-		assert result.skipped
+		assert "image datablock" in result.skipped[0].detail
 
 
 class TestPoseBones:

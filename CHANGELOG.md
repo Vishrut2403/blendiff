@@ -40,6 +40,13 @@
   particular value, because the constant is not the thing that breaks.
 
 ### Fixed
+- **Timeline marker and unit edits merged silently.** Both domains were added
+  to the diff and not folded into the scene merge proposal, so two people
+  moving the same marker merged "cleanly" with no conflict reported and one
+  edit was lost without a word. They are in the proposal now, and a test
+  lists the scene-level domains so the next omission fails rather than
+  passing quietly.
+
 - **A successful restore reported failures it had not had.** Restoring vertex
   positions makes the digest of those positions, and the bounding box they
   describe, true again by construction. They were still listed as changes to
@@ -62,6 +69,33 @@
   captured" rather than as a value nobody set.
 
 ### Added
+- **Scene-wide changes can be merged.** Render settings, units, timeline
+  markers, the world and the scene's own custom properties were compared,
+  built into a merge proposal, and then skipped at apply time with "scene
+  changes must be applied manually". Two people bumping the Cycles sample
+  count were shown the collision and left to go and fix it by hand, which is
+  the one thing a merge tool exists to avoid.
+
+  All of it is applied now: the render engine, resolution, output path and
+  format, frame range, frame rate, colour management, the Cycles and EEVEE
+  settings, every unit setting, the world's colour and ambient occlusion, the
+  background colour and strength, and the scene's custom properties.
+
+  Markers are the one structural change BlenDiff does apply. An object in a
+  snapshot cannot be rebuilt from it, but a marker is nothing but a name and
+  a frame, so adding and removing one is a merge rather than a fabrication.
+
+  Writing order matters in two places and is now fixed rather than
+  alphabetical. The unit system goes before the settings that are only valid
+  within it, since `length_unit` of `FEET` is rejected while the scene is
+  still metric. The output format goes before the colour depth and mode,
+  because Blender resets both when the format changes: a merge that applied
+  the depth first would have reported success for a value the format then
+  threw away.
+
+  An HDRI, a rewired world graph and swapping the world datablock stay out,
+  each saying so.
+
 - **Material node changes can be merged.** Node graphs were compared in
   detail from the first release and could not be written back at all, so
   every material conflict in a merge was read-only: you could see that two

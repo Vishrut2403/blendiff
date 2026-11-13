@@ -213,6 +213,60 @@ class TestSceneDomain:
 		assert tw.total_conflicts == 0
 		assert tw.scene_proposals[0].non_conflicting_from_a
 
+	def test_conflicting_marker_moves_detected(self):
+		def at(frame):
+			return _scene(timeline_markers=[{"name": "shot_010", "frame": frame}])
+
+		tw = MergeEngine().three_way_diff(at(24), at(48), at(96))
+		assert tw.total_conflicts == 1
+
+	def test_conflicting_unit_systems_detected(self):
+		def using(system):
+			return _scene(unit_settings={"system": system, "scale_length": 1.0})
+
+		tw = MergeEngine().three_way_diff(
+			using("NONE"), using("METRIC"), using("IMPERIAL"))
+		assert tw.total_conflicts == 1
+
+	def test_every_scene_level_domain_reaches_the_merge(self):
+		"""
+		A domain added to the diff and not folded into the scene proposal is
+		invisible to the merge: two people editing it merge "cleanly" and one
+		edit is lost without a word. Markers and units arrived in the diff
+		first and here second, which is exactly that. Listing the domains
+		makes the next omission a failing test rather than a silent one.
+		"""
+		edits = {
+			"render": (
+				{"render": {"resolution_x": 1920}},
+				{"render": {"resolution_x": 3840}},
+			),
+			"world": (
+				{"world": {"use_nodes": False, "color": [0.0, 0.0, 0.0]}},
+				{"world": {"use_nodes": False, "color": [1.0, 1.0, 1.0]}},
+			),
+			"scene custom props": (
+				{"scene_custom_props": {"shot": "010"}},
+				{"scene_custom_props": {"shot": "020"}},
+			),
+			"timeline markers": (
+				{"timeline_markers": [{"name": "shot_010", "frame": 24}]},
+				{"timeline_markers": [{"name": "shot_010", "frame": 48}]},
+			),
+			"unit settings": (
+				{"unit_settings": {"system": "METRIC"}},
+				{"unit_settings": {"system": "IMPERIAL"}},
+			),
+		}
+
+		missing = []
+		for domain, (before, after) in edits.items():
+			tw = MergeEngine().three_way_diff(
+				_scene(**before), _scene(**after), _scene(**before))
+			if not tw.scene_proposals:
+				missing.append(domain)
+		assert missing == [], f"not folded into the scene merge: {missing}"
+
 
 class TestRenameAcrossSides:
 	def test_object_renamed_on_one_side_stays_one_proposal(self):

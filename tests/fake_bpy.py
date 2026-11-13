@@ -460,7 +460,9 @@ class FakeNode:
 	             image: Any = None):
 		self.name = name
 		self.type = node_type
-		self.inputs = list(inputs)
+		#: A bpy_prop_collection: iterated by the material applier, which has
+		#: to spot duplicate socket names, and .get() by the world one.
+		self.inputs = FakeIDMapView(inputs)
 		if image is not None or node_type == "TEX_IMAGE":
 			self.image = image
 
@@ -632,11 +634,113 @@ class FakeSceneObjects(list):
 		return default
 
 
+class FakeMarker:
+	def __init__(self, name: str, frame: int = 0, camera: Any = None):
+		self.name = name
+		self.frame = frame
+		self.camera = camera
+
+
+class FakeTimelineMarkers(list):
+	"""scene.timeline_markers, which creates and removes by name."""
+
+	def get(self, name, default=None):
+		for marker in self:
+			if marker.name == name:
+				return marker
+		return default
+
+	def __getitem__(self, key):
+		if isinstance(key, str):
+			marker = self.get(key)
+			if marker is None:
+				raise KeyError(key)
+			return marker
+		return list.__getitem__(self, key)
+
+	def new(self, name: str, frame: int = 0) -> FakeMarker:
+		marker = FakeMarker(name, frame)
+		self.append(marker)
+		return marker
+
+	def remove(self, marker: FakeMarker) -> None:
+		list.remove(self, marker)
+
+
+class FakeWorld:
+	def __init__(self, name="World", use_nodes=False, nodes=(), color=(0.05, 0.05, 0.05)):
+		self.name = name
+		self.use_nodes = use_nodes
+		self.node_tree = FakeNodeTree(nodes) if use_nodes else None
+		self.color = color
+		self.light_settings = FakeStruct(
+			use_ambient_occlusion=False, ao_factor=1.0, distance=10.0,
+		)
+
+
 class FakeScene:
+	"""
+	A scene, as far as the merge applier is concerned.
+
+	The sub-structs are flattened into one dict by the extractor, so the
+	applier has to find its way back to render.image_settings.file_format and
+	view_settings.exposure. Modelling them separately here is what makes a
+	wrong target visible as an AttributeError instead of silently writing the
+	right value in the wrong place.
+	"""
+
 	def __init__(self, name="Scene"):
 		self.name = name
 		self.collection = FakeCollection("Scene Collection")
 		self.objects: FakeSceneObjects = FakeSceneObjects()
+		self.frame_start = 1
+		self.frame_end = 250
+		self.frame_step = 1
+		self.render = FakeStruct(
+			engine="CYCLES",
+			resolution_x=1920,
+			resolution_y=1080,
+			resolution_percentage=100,
+			filepath="/tmp/",
+			fps=24,
+			fps_base=1.0,
+			image_settings=FakeStruct(
+				file_format="PNG", color_mode="RGBA", color_depth="8",
+			),
+		)
+		self.display_settings = FakeStruct(display_device="sRGB")
+		self.view_settings = FakeStruct(
+			view_transform="Filmic", look="None", exposure=0.0, gamma=1.0,
+		)
+		self.cycles = FakeStruct(
+			samples=128, preview_samples=32, use_denoising=False,
+			denoiser="OPENIMAGEDENOISE", device="CPU",
+		)
+		self.eevee = FakeStruct(taa_render_samples=64)
+		self.unit_settings = FakeStruct(
+			system="METRIC", system_rotation="DEGREES", scale_length=1.0,
+			use_separate=False, length_unit="METERS",
+		)
+		self.timeline_markers = FakeTimelineMarkers()
+		self.world = None
+		self._props: dict[str, Any] = {}
+
+	# Custom properties, which are item access on the scene in bpy.
+
+	def __getitem__(self, key):
+		return self._props[key]
+
+	def __setitem__(self, key, value):
+		self._props[key] = value
+
+	def __delitem__(self, key):
+		del self._props[key]
+
+	def __contains__(self, key):
+		return key in self._props
+
+	def keys(self):
+		return self._props.keys()
 
 
 class FakeBpyData:

@@ -145,6 +145,11 @@ would then discard.
 | Geometry nodes inputs | Swapping a node group |
 | Material node input values and textures | Driver variables and their targets |
 | Driver expression, type and use of self | Adding or removing a driver |
+| Render, output and colour management settings | An HDRI, or a rewired world graph |
+| Unit settings | Assigning a different world |
+| Timeline markers, including new ones | |
+| World colour, background and ambient occlusion | |
+| Scene custom properties | |
 | Shape key value, mute and slider range | Adding or removing a shape key |
 | Curve, text, empty and lattice settings | Settings that link to another datablock |
 | Camera and light settings | |
@@ -179,6 +184,9 @@ a merge. The things it will not do, and why:
 - **A driver's expression and type are applied; its variables are not.** The
   diff carries a variable's name, not the datablock it reads from, so
   rebuilding one would be guesswork.
+- **An HDRI is reported, not loaded.** The world's background colour and
+  strength are applied. An environment texture is an image datablock plus a
+  node to feed it, so that one is plugged in by hand.
 - **Adding, removing or retyping a modifier or constraint is reported only.**
   A snapshot records an added one by name and type with no settings, so
   creating it would quietly give it defaults and call that a success.
