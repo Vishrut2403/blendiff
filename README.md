@@ -134,8 +134,8 @@ would then discard.
 |---|---|
 | Position, rotation, scale | Mesh topology, such as a re-mesh |
 | Mesh shape, from a snapshot that stored geometry | A sculpted shape key |
-| Viewport and render visibility | Keyframes, drivers and NLA strips |
-| Object names | Material node graphs |
+| Viewport and render visibility | Keyframes and NLA strips |
+| Object names | Rewiring a node graph, or adding a node |
 | Collection membership | Mesh shape, without stored geometry |
 | Parenting, keeping world position | Collection visibility |
 | Pose bone transforms | Adding or removing an object |
@@ -143,6 +143,8 @@ would then discard.
 | Constraint settings, on objects and bones | Adding, removing or retyping a constraint |
 | Modifier settings and stack order | Adding, removing or retyping a modifier |
 | Geometry nodes inputs | Swapping a node group |
+| Material node input values and textures | Driver variables and their targets |
+| Driver expression, type and use of self | Adding or removing a driver |
 | Shape key value, mute and slider range | Adding or removing a shape key |
 | Curve, text, empty and lattice settings | Settings that link to another datablock |
 | Camera and light settings | |
@@ -166,10 +168,17 @@ a merge. The things it will not do, and why:
   moving things. A re-mesh, a subdivide or anything that changes the vertex
   count leaves those positions describing geometry that no longer exists, so
   the restore is refused rather than applied.
-- **Keyframes, drivers and NLA strips are summarised, not stored.** A diff
-  tells you a channel changed; it cannot rebuild the curve.
-- **Material node graphs are compared but not written back.** Rewiring a
-  shader is reported node by node and reconciled by hand.
+- **Keyframes and NLA strips are summarised, not stored.** A diff tells you
+  a channel changed; it cannot rebuild the curve.
+- **A node graph's shape is reported, not rebuilt.** An input value on a node
+  both sides have, and the image a texture node points at, are applied.
+  Adding, removing or retyping a node, and rewiring the links between them,
+  are reported and reconciled by hand: a snapshot records a node's type and
+  inputs but not its own settings, so building one would give it defaults and
+  call that a success.
+- **A driver's expression and type are applied; its variables are not.** The
+  diff carries a variable's name, not the datablock it reads from, so
+  rebuilding one would be guesswork.
 - **Adding, removing or retyping a modifier or constraint is reported only.**
   A snapshot records an added one by name and type with no settings, so
   creating it would quietly give it defaults and call that a success.

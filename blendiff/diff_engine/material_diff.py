@@ -12,6 +12,16 @@ Design decisions
   tuples — order is irrelevant.
 * Float input values use epsilon comparison (same default as DiffEngine).
 * Returns a list[PropertyChange] so results slot directly into an ObjectDiff.
+* Names sit in quoted brackets, the way every other path in the project
+  writes a name it looked something up by::
+
+      materials["Mat.001"].nodes["Noise Texture"].inputs["Scale"]
+
+  Earlier these were dot-joined ("material[Mat.001].nodes.Noise
+  Texture.inputs.Scale"), which read fine until a node was called
+  "Value.001" or a material "Mat]x": nothing downstream could tell where
+  one name ended and the next key began. Paths are rebuilt on every diff
+  rather than stored, so changing the shape costs no compatibility.
 """
 
 from __future__ import annotations
@@ -20,6 +30,7 @@ import math
 from typing import Any
 
 from ..data_model.diff import PropertyChange
+from ..data_model.paths import escape_name
 
 _DEFAULT_EPSILON = 1e-4
 
@@ -39,7 +50,7 @@ def compare_materials(
 		Dicts matching the MaterialSnapshot schema, or None if the slot
 		was empty on that side.
 	material_name:
-		Used as a prefix in property_path strings, e.g. "Material.001".
+		Used as a prefix in property_path strings, e.g. 'materials["Mat.001"]'.
 	epsilon:
 		Tolerance for float comparisons.
 
@@ -48,7 +59,7 @@ def compare_materials(
 	list[PropertyChange]
 		Empty list if the materials are identical.
 	"""
-	prefix = f"material[{material_name}]"
+	prefix = f'materials["{escape_name(material_name)}"]'
 
 	# Both absent — no diff
 	if mat_a is None and mat_b is None:
@@ -99,7 +110,7 @@ def _diff_nodes(
 	for name in sorted(keys_b - keys_a):
 		node = nodes_b[name]
 		changes.append(PropertyChange(
-			property_path=f"{prefix}.nodes.{name}",
+			property_path=f'{prefix}.nodes["{escape_name(name)}"]',
 			old_value=None,
 			new_value=node.get("type"),
 		))
@@ -108,7 +119,7 @@ def _diff_nodes(
 	for name in sorted(keys_a - keys_b):
 		node = nodes_a[name]
 		changes.append(PropertyChange(
-			property_path=f"{prefix}.nodes.{name}",
+			property_path=f'{prefix}.nodes["{escape_name(name)}"]',
 			old_value=node.get("type"),
 			new_value=None,
 		))
@@ -117,7 +128,8 @@ def _diff_nodes(
 	for name in sorted(keys_a & keys_b):
 		node_a = nodes_a[name]
 		node_b = nodes_b[name]
-		changes.extend(_compare_node(node_a, node_b, f"{prefix}.nodes.{name}", epsilon))
+		node_prefix = f'{prefix}.nodes["{escape_name(name)}"]'
+		changes.extend(_compare_node(node_a, node_b, node_prefix, epsilon))
 
 	return changes
 
@@ -174,7 +186,7 @@ def _diff_inputs(
 			# Socket added or removed (rare — usually means node type changed)
 			if inp_a != inp_b:
 				changes.append(PropertyChange(
-					property_path=f"{prefix}.inputs.{name}",
+					property_path=f'{prefix}.inputs["{escape_name(name)}"]',
 					old_value=inp_a.get("value") if inp_a else None,
 					new_value=inp_b.get("value") if inp_b else None,
 				))
@@ -185,7 +197,7 @@ def _diff_inputs(
 
 		if not _values_equal(val_a, val_b, epsilon):
 			changes.append(PropertyChange(
-				property_path=f"{prefix}.inputs.{name}",
+				property_path=f'{prefix}.inputs["{escape_name(name)}"]',
 				old_value=val_a,
 				new_value=val_b,
 			))

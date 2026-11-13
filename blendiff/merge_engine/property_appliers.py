@@ -929,6 +929,229 @@ def _apply_modifier_order(obj: Any, path: str, value: Any, context: Any) -> None
 			obj.modifiers.move(position, index)
 
 
+# Material node graphs
+#
+# Only an input value on a node that exists on both sides, and the image a
+# texture node points at. Those are the two things anyone actually tweaks
+# after a graph is built, and both are a single assignment.
+#
+# Adding, removing or retyping a node stays out: the snapshot records a node's
+# type and input values but not its node-specific settings, so BlenDiff would
+# create a node that looked right and behaved differently. Rewiring stays out
+# because a link is only meaningful alongside the nodes it joins, and applying
+# half a rewire leaves a graph that renders nothing.
+
+_MATERIAL_NODE = r'^materials\["' + QUOTED_NAME + r'"\]\.nodes\["' + QUOTED_NAME + r'"\]'
+
+_MATERIAL_NODE_INPUT = re.compile(
+	_MATERIAL_NODE + r'\.inputs\["' + QUOTED_NAME + r'"\]$'
+)
+
+_MATERIAL_NODE_IMAGE = re.compile(_MATERIAL_NODE + r'\.image$')
+
+
+def _material_node(obj: Any, material_name: str, node_name: str) -> Any:
+	"""
+	Find one node of one of this object's materials.
+
+	The material is looked up in the object's own slots rather than in
+	bpy.data.materials: a file can hold several materials with names that only
+	differ by a numeric suffix, and writing to one the object does not use
+	would change some other object's look while appearing to succeed here.
+	"""
+	for slot in obj.material_slots:
+		mat = slot.material
+		if mat is not None and mat.name == material_name:
+			break
+	else:
+		raise ValueError(f"{obj.name!r} has no material named {material_name!r}.")
+
+	if not mat.use_nodes or mat.node_tree is None:
+		raise ValueError(
+			f"Material {material_name!r} has no node tree, so {node_name!r} "
+			f"does not exist in it."
+		)
+
+	node = mat.node_tree.nodes.get(node_name)
+	if node is None:
+		raise ValueError(
+			f"Material {material_name!r} has no node named {node_name!r}; its "
+			f"graph differs from the one the snapshot recorded."
+		)
+	return node
+
+
+def _socket_value(socket: Any, value: Any) -> Any:
+	"""Coerce a recorded socket value back to what default_value accepts."""
+	kind = getattr(socket, "type", "")
+
+	if kind == "VALUE":
+		return float(value)
+	if kind == "INT":
+		return int(value)
+	if kind == "BOOLEAN":
+		return bool(value)
+	if kind == "STRING":
+		return str(value)
+
+	if kind in ("RGBA", "RGB", "VECTOR"):
+		components = list(value)
+		expected = len(socket.default_value)
+		if len(components) != expected:
+			raise ValueError(
+				f"{socket.name!r} takes {expected} components, but the "
+				f"snapshot recorded {len(components)}."
+			)
+		return components
+
+	return value
+
+
+def _apply_material_node_input(obj: Any, path: str, value: Any, context: Any) -> None:
+	"""Write one input value on an existing node of one of this object's materials."""
+	match = _MATERIAL_NODE_INPUT.match(path)
+	if match is None:
+		raise ValueError(f"Unsupported material node property {path!r}")
+
+	material_name, node_name, socket_name = (
+		unescape_name(group) for group in match.groups()
+	)
+	node = _material_node(obj, material_name, node_name)
+
+	# A node's input names are not unique: a Math node has three sockets all
+	# called "Value". The extractor keys inputs by name, so it only ever kept
+	# the last of those, and there is no way back from the name to the socket
+	# the change came from. Refusing beats a one-in-three guess that silently
+	# rewires the maths.
+	sockets = [sock for sock in node.inputs if sock.name == socket_name]
+	if not sockets:
+		raise ValueError(
+			f"Node {node_name!r} has no input named {socket_name!r}; its type "
+			f"or version differs from the one recorded."
+		)
+	if len(sockets) > 1:
+		raise ValueError(
+			f"Node {node_name!r} has {len(sockets)} inputs named "
+			f"{socket_name!r}, so which one changed cannot be told apart; set "
+			f"it by hand."
+		)
+
+	socket = sockets[0]
+	if not hasattr(socket, "default_value"):
+		raise ValueError(f"Input {socket_name!r} holds no value that can be written.")
+
+	if socket.is_linked:
+		raise ValueError(
+			f"Input {socket_name!r} is linked to another node, so its value "
+			f"comes from that link and writing one would change nothing."
+		)
+
+	if value is None:
+		raise ValueError(
+			f"The snapshot recorded no value for {socket_name!r}, so there is "
+			f"nothing to write."
+		)
+
+	socket.default_value = _socket_value(socket, value)
+
+
+def _apply_material_node_image(obj: Any, path: str, value: Any, context: Any) -> None:
+	"""Point a texture node at an image datablock by name."""
+	import bpy
+
+	match = _MATERIAL_NODE_IMAGE.match(path)
+	if match is None:
+		raise ValueError(f"Unsupported material node property {path!r}")
+
+	material_name, node_name = (unescape_name(group) for group in match.groups())
+	node = _material_node(obj, material_name, node_name)
+
+	if not hasattr(node, "image"):
+		raise ValueError(
+			f"Node {node_name!r} is a {getattr(node, 'type', '?')} node and "
+			f"holds no image."
+		)
+
+	if value is None:
+		node.image = None
+		return
+
+	image = bpy.data.images.get(str(value))
+	if image is None:
+		raise ValueError(
+			f"No image named {value!r} in this file; load it first, then apply "
+			f"this change."
+		)
+	node.image = image
+
+
+# Drivers
+#
+# Three fields, each a single assignment on the driver of an existing driven
+# FCurve: what kind of driver it is, the expression it evaluates and whether
+# that expression can see the driven object as "self".
+#
+# Variables stay out. The diff reports only their names, because the full
+# list is compared as a whole, so there is nothing to write from. Rebuilding
+# one would also mean resolving its targets' datablocks and id_types, which is
+# creating a driver rather than merging a change to one.
+
+_DRIVER_PROP = re.compile(
+	r'^drivers\["' + QUOTED_NAME + r'"\]\[(\d+)\]\.'
+	r'(driver_type|expression|use_self)$'
+)
+
+#: Snapshot key -> the attribute on bpy.types.Driver. "driver_type" is called
+#: "type" there; the snapshot spells it out so reports read plainly.
+_DRIVER_ATTRS = {
+	"driver_type": "type",
+	"expression": "expression",
+	"use_self": "use_self",
+}
+
+
+def _apply_driver(obj: Any, path: str, value: Any, context: Any) -> None:
+	"""Write one field of an existing driver."""
+	match = _DRIVER_PROP.match(path)
+	if match is None:
+		raise ValueError(f"Unsupported driver property {path!r}")
+
+	data_path = unescape_name(match.group(1))
+	array_index = int(match.group(2))
+	field = match.group(3)
+
+	anim = getattr(obj, "animation_data", None)
+	if anim is None:
+		raise ValueError(f"{obj.name!r} has no animation data, so it has no drivers.")
+
+	fcurve = anim.drivers.find(data_path, index=array_index)
+	if fcurve is None:
+		raise ValueError(
+			f"{obj.name!r} has no driver on {data_path!r}[{array_index}]; it "
+			f"differs from the one the snapshot recorded."
+		)
+
+	driver = fcurve.driver
+	if field == "expression":
+		# A SCRIPTED driver is the only kind that evaluates an expression, and
+		# the extractor records "" for the others. Writing that empty string
+		# over a working expression because the driver type also changed in
+		# the same merge would quietly break the rig.
+		if driver.type != "SCRIPTED" and not value:
+			raise ValueError(
+				f"The driver on {data_path!r}[{array_index}] is "
+				f"{driver.type}, which evaluates no expression."
+			)
+		driver.expression = str(value or "")
+		return
+
+	if field == "use_self":
+		driver.use_self = bool(value)
+		return
+
+	driver.type = str(value)
+
+
 # Registry
 #
 # Order matters only in that the first match wins; patterns are disjoint.
@@ -976,6 +1199,9 @@ REGISTRY: tuple[ApplierEntry, ...] = (
 	ApplierEntry(_MODIFIER_PROP, _apply_modifier, "Modifier setting"),
 	ApplierEntry(re.compile(r"^modifiers\.order$"), _apply_modifier_order, "Modifier order"),
 	ApplierEntry(_SHAPE_KEY_PROP, _apply_shape_key, "Shape key setting"),
+	ApplierEntry(_MATERIAL_NODE_INPUT, _apply_material_node_input, "Material node input"),
+	ApplierEntry(_MATERIAL_NODE_IMAGE, _apply_material_node_image, "Texture node image"),
+	ApplierEntry(_DRIVER_PROP, _apply_driver, "Driver setting"),
 )
 
 
@@ -1026,12 +1252,28 @@ UNSUPPORTED_REASONS: tuple[tuple[re.Pattern, str], ...] = (
 	 "This constraint change must be made by hand."),
 	(re.compile(r"^fcurves?\."),
 	 "Animation curves are summarised, not stored — keyframes cannot be rebuilt."),
-	(re.compile(r"^drivers?\."),
-	 "Drivers are not yet applicable; re-create the driver manually."),
+	(re.compile(r'^drivers\["' + QUOTED_NAME + r'"\]\[\d+\]\.variables$'),
+	 "The diff records only the variables' names, not their targets; set them "
+	 "in the driver editor."),
+	(re.compile(r'^drivers\["' + QUOTED_NAME + r'"\]\[\d+\]$'),
+	 "Adding or removing a driver is not applicable; create it on the "
+	 "property itself."),
+	(re.compile(r"^drivers?[\[.]"),
+	 "This driver change must be made by hand."),
 	(re.compile(r"^nla"),
 	 "NLA tracks are not yet applicable; re-create the strip manually."),
-	(re.compile(r"^material\."),
-	 "Material node graphs are not yet applicable; edit the material directly."),
+	(re.compile(_MATERIAL_NODE + r"\.type$"),
+	 "Changing a node's type replaces it; swap the node by hand."),
+	(re.compile(_MATERIAL_NODE + r"$"),
+	 "Adding or removing a node is not applicable; the snapshot records its "
+	 "type and inputs but not its own settings."),
+	(re.compile(r'^materials\["' + QUOTED_NAME + r'"\]\.links$'),
+	 "Rewiring a node graph is not applicable; connect the sockets by hand."),
+	(re.compile(r'^materials\["' + QUOTED_NAME + r'"\]\.use_nodes$'),
+	 "Turning nodes on or off replaces the whole graph; toggle it in the "
+	 "material."),
+	(re.compile(r"^materials?[\[.]"),
+	 "This material change must be made by hand."),
 	(re.compile(r"^scene\."),
 	 "Scene-level settings are applied separately from object merges."),
 	(re.compile(r"^__add_add__$"),

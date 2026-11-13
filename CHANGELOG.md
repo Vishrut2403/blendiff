@@ -3,6 +3,19 @@
 ## Unreleased
 
 ### Changed
+- **Material and driver property paths quote the names they look up.** A
+  material change read as `material[Mat.001].nodes.Noise
+  Texture.inputs.Scale` and a driver change as
+  `drivers[pose.bones["Head"].location][0]`. Both were fine to read and
+  impossible to parse: a node called `Value.001`, a material called `Mat]x`
+  or any driver on a bone left no way to tell where one name ended and the
+  next key began, which is exactly what an applier has to do.
+
+  They now use the quoted brackets the rest of the project already uses:
+  `materials["Mat.001"].nodes["Noise Texture"].inputs["Scale"]`. Paths are
+  rebuilt on every diff rather than stored in a sidecar, so nothing older
+  stops opening.
+
 - **Content digests are shown as short fingerprints.** A changed digest was
   printed in full, so a repainted vertex group read as seventy characters of
   hex across two lines. A digest is a fingerprint rather than a value, and
@@ -49,6 +62,38 @@
   captured" rather than as a value nobody set.
 
 ### Added
+- **Material node changes can be merged.** Node graphs were compared in
+  detail from the first release and could not be written back at all, so
+  every material conflict in a merge was read-only: you could see that two
+  people had set the roughness differently and you still had to go and fix
+  it by hand.
+
+  An input value on a node both sides have, and the image a texture node
+  points at, are now applied. Those are the two parts of a graph that are a
+  single assignment, and between them they cover almost everything anyone
+  changes once a shader is built.
+
+  Adding, removing or retyping a node stays out, and so does rewiring: a
+  snapshot records a node's type and its inputs but not its own settings, so
+  BlenDiff would build something that looked right and rendered differently.
+  Each of those now says why rather than reporting a blank limit.
+
+  Two cases are refused rather than guessed. A socket fed by another node
+  ignores its own value, so writing one would report success and change
+  nothing visible. And a node can have several inputs with the same name: a
+  Math node has three called "Value", of which a snapshot keeps only the
+  last, so which one changed cannot be told apart.
+
+- **Driver changes can be merged.** A driver's expression, its type and
+  whether it can see the driven object as `self` are each one assignment on
+  a driver that already exists, and all three are now applied. Retargeting a
+  rig's drivers was previously something a merge could only report.
+
+  Variables stay out, because the diff carries their names and not their
+  targets, and an empty expression is never written over a working one: the
+  snapshot records `""` for every driver that is not scripted, and taking
+  that side of a merge would have wiped the expression a rig depends on.
+
 - **Timeline markers and unit settings are compared.** Neither was captured.
   Markers record shot boundaries and can bind a camera, so moving one changes
   where an edit lands and a changed binding changes what renders, and none of

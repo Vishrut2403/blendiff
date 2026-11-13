@@ -46,7 +46,7 @@ FULL_RESULT = {
 					"new_value": [1.0, 2.0, 3.0],
 				},
 				{
-					"property_path": "material[Material].nodes.Principled BSDF.inputs.Roughness",
+					"property_path": 'materials["Material"].nodes["Principled BSDF"].inputs["Roughness"]',
 					"old_value": 0.2,
 					"new_value": 0.8,
 				},

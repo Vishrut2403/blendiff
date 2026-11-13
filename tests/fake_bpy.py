@@ -192,6 +192,9 @@ class FakeObject:
 		self.constraints: list["FakeConstraint"] = []
 		self.library = None
 		self.override_library = None
+		#: None until a test gives the object drivers, matching bpy, where
+		#: animation_data only exists once something is animated.
+		self.animation_data = None
 		self._props: dict[str, Any] = {}
 		self._collections: list[FakeCollection] = []
 		# Only armatures have a pose; None everywhere else, matching bpy.
@@ -433,9 +436,82 @@ class FakeSlot:
 		self.material = material
 
 
+class FakeNodeSocket:
+	"""
+	One input socket on a material node.
+
+	Unlike a node group's interface item, this one carries a value, so the
+	applier's coercion and its refusal to write a linked socket are both
+	exercised here.
+	"""
+
+	def __init__(self, name: str, socket_type: str = "VALUE", default_value: Any = 0.0,
+	             is_linked: bool = False):
+		self.name = name
+		self.type = socket_type
+		self.default_value = default_value
+		self.is_linked = is_linked
+
+
+class FakeNode:
+	"""One node of a material's node tree."""
+
+	def __init__(self, name: str, node_type: str = "BSDF_PRINCIPLED", inputs=(),
+	             image: Any = None):
+		self.name = name
+		self.type = node_type
+		self.inputs = list(inputs)
+		if image is not None or node_type == "TEX_IMAGE":
+			self.image = image
+
+
+class FakeNodeTree:
+	def __init__(self, nodes=()):
+		self.nodes = FakeIDMapView(nodes)
+
+
 class FakeMaterial:
+	def __init__(self, name: str, use_nodes: bool = False, nodes=None):
+		self.name = name
+		self.use_nodes = use_nodes
+		self.node_tree = FakeNodeTree(nodes or ()) if use_nodes else None
+
+
+class FakeImage:
 	def __init__(self, name: str):
 		self.name = name
+
+
+class FakeDriver:
+	"""bpy.types.Driver: what a driven FCurve evaluates."""
+
+	def __init__(self, driver_type: str = "SCRIPTED", expression: str = "",
+	             use_self: bool = False):
+		self.type = driver_type
+		self.expression = expression
+		self.use_self = use_self
+
+
+class FakeDrivenCurve:
+	def __init__(self, data_path: str, array_index: int = 0, driver=None):
+		self.data_path = data_path
+		self.array_index = array_index
+		self.driver = driver or FakeDriver()
+
+
+class FakeDrivers(list):
+	"""obj.animation_data.drivers, which answers find(data_path, index=)."""
+
+	def find(self, data_path: str, index: int = 0):
+		for curve in self:
+			if curve.data_path == data_path and curve.array_index == index:
+				return curve
+		return None
+
+
+class FakeAnimData:
+	def __init__(self, drivers=()):
+		self.drivers = FakeDrivers(drivers)
 
 
 class FakeCollectionObjects:
@@ -568,6 +644,7 @@ class FakeBpyData:
 		self.objects = FakeIDMap(scene_objects)
 		self.materials = FakeIDMap()
 		self.collections = FakeIDMap()
+		self.images = FakeIDMap()
 		self.filepath = ""
 
 

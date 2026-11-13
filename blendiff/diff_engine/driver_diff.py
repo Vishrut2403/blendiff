@@ -3,6 +3,7 @@ from __future__ import annotations
 from .identity_match import resolve_pairs
 from ..data_model.diff import PropertyChange
 from ..data_model.driver_diff import DriverDiff
+from ..data_model.paths import escape_name
 
 
 def _driver_key(driver: dict) -> tuple:
@@ -43,7 +44,12 @@ def diff_drivers(
 
 	for key in all_keys:
 		data_path, array_index = key
-		slot = f"{prefix}[{data_path}][{array_index}]"
+		# The driven property's own data path goes in quoted brackets, like
+		# every other name a path looks something up by. A driver on a bone
+		# has brackets of its own (pose.bones["Head"].location), so writing
+		# it in bare ones gave drivers[pose.bones["Head"].location][0],
+		# which no reader could split back into a path and an index.
+		slot = f'{prefix}["{escape_name(data_path)}"][{array_index}]'
 
 		drv_a = map_a.get(key)
 		drv_b = map_b.get(key)

@@ -2480,6 +2480,245 @@ def test_timeline_markers_and_units_are_captured_and_diffed():
 	         "an unchanged scene stays clean")
 
 
+# Material node graphs
+#
+# Needs real bpy: a Principled BSDF's socket names, which of them are linked,
+# and what default_value accepts are all Blender's own, and faking them is
+# exactly how a merge that writes to the wrong socket would slip through.
+
+@test
+def test_a_material_input_merges_back():
+	from blendiff.data_model.conflict import Resolution
+	from blendiff.merge_engine.applier import Applier
+	from blendiff.merge_engine.merge_engine import MergeEngine
+
+	reset_scene()
+	bpy.ops.mesh.primitive_cube_add()
+	cube = bpy.context.view_layer.objects.active
+	material = bpy.data.materials.new("Skin")
+	material.use_nodes = True
+	cube.data.materials.append(material)
+	node = material.node_tree.nodes["Principled BSDF"]
+	node.inputs["Roughness"].default_value = 0.5
+	base = extract()
+
+	node.inputs["Roughness"].default_value = 0.1
+	node.inputs["Base Color"].default_value = (1.0, 0.0, 0.0, 1.0)
+	version_a = extract()
+
+	node.inputs["Roughness"].default_value = 0.9
+	node.inputs["Base Color"].default_value = (0.0, 0.0, 1.0, 1.0)
+	version_b = extract()
+
+	three_way = MergeEngine().three_way_diff(
+		base=base, version_a=version_a, version_b=version_b,
+		base_label="base", label_a="A", label_b="B",
+	)
+	conflicts = [c for p in three_way.proposals for c in p.conflicts]
+	check_eq(bool(conflicts), True, "the two edits conflict")
+	check_eq(all(c.applicable for c in conflicts), True,
+	         "and every one of them is applicable")
+	for conflict in conflicts:
+		conflict.resolution = Resolution.USE_A
+
+	result = Applier().apply_all(three_way, bpy.context)
+	check_eq(result.failed, [], "nothing failed to apply")
+	check_eq(round(node.inputs["Roughness"].default_value, 3), 0.1,
+	         "roughness taken from A")
+	check_eq([round(c, 3) for c in node.inputs["Base Color"].default_value],
+	         [1.0, 0.0, 0.0, 1.0], "base colour taken from A")
+	check_eq(DiffEngine().compare(extract(), version_a).has_changes, False,
+	         "the scene now matches A exactly")
+
+
+@test
+def test_a_linked_socket_is_not_written():
+	"""A socket fed by another node ignores its own value, so writing it lies."""
+	from blendiff.merge_engine.property_appliers import apply_property
+
+	reset_scene()
+	bpy.ops.mesh.primitive_cube_add()
+	cube = bpy.context.view_layer.objects.active
+	material = bpy.data.materials.new("Skin")
+	material.use_nodes = True
+	cube.data.materials.append(material)
+	tree = material.node_tree
+	bsdf = tree.nodes["Principled BSDF"]
+	noise = tree.nodes.new("ShaderNodeTexNoise")
+	tree.links.new(noise.outputs["Fac"], bsdf.inputs["Roughness"])
+
+	path = 'materials["Skin"].nodes["Principled BSDF"].inputs["Roughness"]'
+	try:
+		apply_property(cube, path, 0.9, bpy.context)
+		check_eq(True, False, "writing a linked socket should have been refused")
+	except ValueError as exc:
+		check_eq("linked" in str(exc), True, "and the reason says it is linked")
+
+
+@test
+def test_a_rewired_graph_is_reported_not_applied():
+	from blendiff.merge_engine.property_appliers import can_apply, unsupported_reason
+
+	reset_scene()
+	bpy.ops.mesh.primitive_cube_add()
+	cube = bpy.context.view_layer.objects.active
+	material = bpy.data.materials.new("Skin")
+	material.use_nodes = True
+	cube.data.materials.append(material)
+	tree = material.node_tree
+	before = extract()
+
+	emission = tree.nodes.new("ShaderNodeEmission")
+	tree.links.new(emission.outputs["Emission"],
+	               tree.nodes["Material Output"].inputs["Surface"])
+	after = extract()
+
+	diff = DiffEngine().compare(before, after)
+	paths = [c.property_path for d in diff.object_diffs
+	         for c in d.changes if "materials[" in c.property_path]
+	check_eq(bool(paths), True, "the rewire is reported")
+	check_eq(any(can_apply(path) for path in paths), False,
+	         "but none of it is applicable")
+	for path in paths:
+		check_eq("by hand" in unsupported_reason(path)
+		         or "not applicable" in unsupported_reason(path)
+		         or "replaces" in unsupported_reason(path),
+		         True, f"{path} says why not")
+
+
+@test
+def test_a_texture_image_merges_back():
+	from blendiff.merge_engine.property_appliers import apply_property
+
+	reset_scene()
+	bpy.ops.mesh.primitive_cube_add()
+	cube = bpy.context.view_layer.objects.active
+	material = bpy.data.materials.new("Skin")
+	material.use_nodes = True
+	cube.data.materials.append(material)
+	node = material.node_tree.nodes.new("ShaderNodeTexImage")
+	node.name = "Bark"
+	wanted = bpy.data.images.new("bark.png", 4, 4)
+
+	apply_property(cube, 'materials["Skin"].nodes["Bark"].image',
+	               "bark.png", bpy.context)
+	check_eq(node.image is wanted, True, "the image datablock was assigned")
+
+	try:
+		apply_property(cube, 'materials["Skin"].nodes["Bark"].image',
+		               "absent.png", bpy.context)
+		check_eq(True, False, "an unloaded image should have been refused")
+	except ValueError as exc:
+		check_eq("No image named" in str(exc), True, "and says to load it first")
+
+
+# Drivers
+#
+# Needs real bpy: driver_add, the find() lookup by data path and index, and
+# the fact that a driver on a bone has a data path with brackets in it.
+
+@test
+def test_a_driver_expression_merges_back():
+	from blendiff.data_model.conflict import Resolution
+	from blendiff.merge_engine.applier import Applier
+	from blendiff.merge_engine.merge_engine import MergeEngine
+
+	reset_scene()
+	cube = add_mesh("Cube")
+	fcurve = cube.driver_add("location", 2)
+	fcurve.driver.type = "SCRIPTED"
+	fcurve.driver.expression = "frame * 0.5"
+	base = extract()
+
+	fcurve.driver.expression = "frame * 0.25"
+	fcurve.driver.use_self = True
+	version_a = extract()
+
+	fcurve.driver.expression = "frame * 2.0"
+	fcurve.driver.use_self = False
+	version_b = extract()
+
+	three_way = MergeEngine().three_way_diff(
+		base=base, version_a=version_a, version_b=version_b,
+		base_label="base", label_a="A", label_b="B",
+	)
+	conflicts = [c for p in three_way.proposals for c in p.conflicts]
+	check_eq(bool(conflicts), True, "the two edits conflict")
+	check_eq([c.property_path for c in conflicts if not c.applicable], [],
+	         "and every one of them is applicable")
+	for conflict in conflicts:
+		conflict.resolution = Resolution.USE_A
+
+	result = Applier().apply_all(three_way, bpy.context)
+	check_eq(result.failed, [], "nothing failed to apply")
+	check_eq(cube.animation_data.drivers.find("location", index=2).driver.expression,
+	         "frame * 0.25", "expression taken from A")
+	check_eq(cube.animation_data.drivers.find("location", index=2).driver.use_self,
+	         True, "use_self taken from A")
+	check_eq(DiffEngine().compare(extract(), version_a).has_changes, False,
+	         "the scene now matches A exactly")
+
+
+@test
+def test_a_driver_on_a_bone_is_found_by_its_data_path():
+	"""A bone's data path carries brackets, which the property path escapes."""
+	from blendiff.merge_engine.property_appliers import apply_property
+
+	reset_scene()
+	armature = bpy.data.armatures.new("Rig")
+	rig = bpy.data.objects.new("Rig", armature)
+	bpy.context.scene.collection.objects.link(rig)
+	bpy.context.view_layer.objects.active = rig
+	bpy.ops.object.mode_set(mode="EDIT")
+	bone = armature.edit_bones.new("Head")
+	bone.head, bone.tail = (0, 0, 0), (0, 0, 1)
+	bpy.ops.object.mode_set(mode="OBJECT")
+
+	pose_bone = rig.pose.bones["Head"]
+	fcurve = pose_bone.driver_add("location", 1)
+	fcurve.driver.type = "SCRIPTED"
+	fcurve.driver.expression = "frame"
+
+	before = extract()
+	fcurve.driver.expression = "frame * 3"
+	after = extract()
+
+	diff = DiffEngine().compare(before, after)
+	paths = [c.property_path for d in diff.driver_diffs for c in d.changes]
+	check_eq(len(paths), 1, "one change reported")
+	check_eq(apply_property(rig, paths[0], "frame", bpy.context), True,
+	         "and the path leads back to that very driver")
+	check_eq(fcurve.driver.expression, "frame", "the expression was written")
+
+
+@test
+def test_driver_variables_are_reported_not_applied():
+	from blendiff.merge_engine.property_appliers import can_apply, unsupported_reason
+
+	reset_scene()
+	cube = add_mesh("Cube")
+	other = add_mesh("Other", location=(3, 0, 0))
+	fcurve = cube.driver_add("location", 0)
+	fcurve.driver.type = "SCRIPTED"
+	fcurve.driver.expression = "x"
+	before = extract()
+
+	variable = fcurve.driver.variables.new()
+	variable.name = "x"
+	variable.targets[0].id = other
+	after = extract()
+
+	diff = DiffEngine().compare(before, after)
+	paths = [c.property_path for d in diff.driver_diffs for c in d.changes]
+	check_eq(any(path.endswith(".variables") for path in paths),
+	         True, "the variable change is reported")
+	for path in paths:
+		if path.endswith(".variables"):
+			check_eq(can_apply(path), False, "but it is not applicable")
+			check_eq("driver editor" in unsupported_reason(path), True,
+			         "and says where to set it")
+
+
 def main() -> int:
 	passed, failed = 0, []
 

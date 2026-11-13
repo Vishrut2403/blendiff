@@ -107,7 +107,7 @@ class TestUseNodesChange:
 		mat_b = make_material(use_nodes=True)
 		changes = compare_materials(mat_a, mat_b, "Material")
 		assert len(changes) == 1
-		assert changes[0].property_path == "material[Material].use_nodes"
+		assert changes[0].property_path == 'materials["Material"].use_nodes'
 		assert changes[0].old_value is False
 		assert changes[0].new_value is True
 
@@ -128,7 +128,7 @@ class TestNodeAddedRemoved:
 		mat_b = make_material(nodes={"Emission": make_node("Emission", "EMISSION")})
 		changes = compare_materials(mat_a, mat_b, "Mat")
 		assert len(changes) == 1
-		assert "nodes.Emission" in changes[0].property_path
+		assert changes[0].property_path == 'materials["Mat"].nodes["Emission"]'
 		assert changes[0].old_value is None
 		assert changes[0].new_value == "EMISSION"
 
@@ -312,7 +312,16 @@ class TestPropertyPathFormat:
 		mat_a = make_material(nodes={"Principled BSDF": node_a})
 		mat_b = make_material(nodes={"Principled BSDF": node_b})
 		changes = compare_materials(mat_a, mat_b, "Mat")
-		assert "inputs.Roughness" in changes[0].property_path
+		assert changes[0].property_path == (
+			'materials["Mat"].nodes["Principled BSDF"].inputs["Roughness"]')
+
+	def test_quoted_names_are_escaped(self):
+		node = 'say "hi"'
+		mat_a = make_material(nodes={node: make_node(node, "EMISSION")})
+		mat_b = make_material(nodes={})
+		changes = compare_materials(mat_a, mat_b, 'Mat"x')
+		assert changes[0].property_path == (
+			r'materials["Mat\"x"].nodes["say \"hi\""]')
 
 
 # _values_equal helper
